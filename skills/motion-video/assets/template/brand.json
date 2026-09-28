@@ -1,0 +1,26 @@
+{
+  "name": "Brand",
+  "wordmark": "brand",
+  "colors": {
+    "bg": "#ffffff",
+    "ink": "#0b0d12",
+    "muted": "#8a8f99",
+    "hairline": "#d5d8de",
+    "accent": "#1f5bff",
+    "alert": "#e5372a"
+  },
+  "fonts": {
+    "display": { "family": "Display", "files": ["fonts/display.woff2"], "fallback": "ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif", "weight": "100 900", "stretch": "75% 125%" },
+    "mono": { "family": "Mono", "files": ["fonts/mono.woff2"], "fallback": "ui-monospace, SFMono-Regular, Menlo, monospace", "weight": "100 800", "stretch": "75% 112.5%" }
+  },
+  "logo": "brand/logo.svg",
+  "copy": {
+    "headline": [["Motion", 400], ["from", 400], ["pure", 600], ["code.", 600]],
+    "caption": "Rendered from code · every frame f(t)",
+    "featuresTitle": ["Built for ", "the beat."],
+    "features": ["Deterministic frames", "Real motion blur", "Beat-synced sound"],
+    "tagline": ["Your story, ", "on the beat."],
+    "hud": ["Motion video", "Made with code"]
+  },
+  "note": "Replace with the target brand (see references/brand-extraction.md). Font files and the logo are copied into fonts/ and brand/ of this project; missing files fall back to the system stacks and a plain disc mark. Optional `colorProbes` (qa.py colour-decode check): [{ \"label\": \"...\", \"role\": \"ink\" (a key in `colors`, or use `hex` instead), \"at\": 2.5 (s), \"rect\": [x0, y0, x1, y1] (full-resolution px), \"tolerance\": 3 }, ...]. Third-party marks fetched with logos.mjs record their own licence/source in brand/providers/SOURCES.json -- verify anything logos.mjs flags before commercial use."
+}

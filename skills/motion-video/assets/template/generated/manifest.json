@@ -1,0 +1,4 @@
+{
+  "note": "Raster assets generated with gen-image.mjs (the Codex CLI's own built-in image tool, no other provider -- see references/generated-assets.md). gen-image.mjs appends one entry per file automatically, in this shape: { \"file\": \"generated/<name>.png\", \"prompt\": \"<the exact prompt used, incl. the no-text/no-logo suffix>\", \"size\": \"1024x1024|1536x1024|1024x1536\", \"transparent\": true|false, \"scene\": \"<which scene/cue uses it>\", \"date\": \"YYYY-MM-DD\", \"tool\": \"codex-cli <version>\" }. Empty until a video actually needs a generated plate, texture or illustration -- most videos need none. Never a logo, wordmark, type, UI, product screenshot, or anything that carries a claim (those come from brand.json / real evidence, not a generator).",
+  "assets": []
+}

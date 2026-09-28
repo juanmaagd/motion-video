@@ -1,0 +1,31 @@
+{
+  "title": "Motion video demo",
+  "slug": "motion-video-demo",
+  "fps": 60,
+  "width": 1920,
+  "height": 1080,
+  "duration": 7.5,
+  "bpm": 128,
+  "offset": 0,
+  "loudness": -14,
+  "truePeak": -1,
+  "note": "Beats are 1-based: beat n is at offset + (n - 1) * 60 / bpm. duration = bars * 240 / bpm (here 4 bars). Cues with hit: true are checked for picture/sound sync by qa.py; `pictureSyncWindow` widens its search/accept window from the default 4 frames. Optional lag-proof tuning (see lagproof.py): `holds`: [[start, end], ...] (s) -- declared still windows, each should be <= 0.3 s; `lagThreshold` -- still-vs-moving cutoff, either one number or a per-scale {\"full\": N, \"preview\": M} object (a preview encode is often far more destructive to subtle motion than the final -- pitfall 59); calibrate both with `lagproof.py --blocks` on the encode you actually ship. This demo's own values (grain alpha 0.16, camera drift ~20-40 px swings, engine.js/index.html) were calibrated exactly this way. `lagProofEnd` -- seconds to check (default the whole `duration`; exclude a deliberately static final hold if you have one). Web-encode budget (build.mjs): `webSizeBudget` (MB, default 10) and `webCrf` (starting CRF, default 20, steps up to 28). Formats: 1920x1080 (16:9), 1080x1920 (9:16), 1080x1080 (1:1).",
+  "lagThreshold": { "full": 1.2, "preview": 0.15 },
+  "cues": [
+    { "name": "open", "beat": 1 },
+    { "name": "word1", "beat": 2 },
+    { "name": "word2", "beat": 2.5 },
+    { "name": "word3", "beat": 3 },
+    { "name": "word4", "beat": 3.5 },
+    { "name": "collapse", "beat": 4.25 },
+    { "name": "turn", "beat": 4.5 },
+    { "name": "drop", "beat": 5, "hit": true },
+    { "name": "item1", "beat": 6 },
+    { "name": "item2", "beat": 7 },
+    { "name": "item3", "beat": 8 },
+    { "name": "lock", "beat": 9, "hit": true },
+    { "name": "wordmark", "beat": 9.5 },
+    { "name": "tagline", "beat": 11 },
+    { "name": "end", "beat": 17 }
+  ]
+}

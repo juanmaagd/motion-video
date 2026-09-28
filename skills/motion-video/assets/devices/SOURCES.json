@@ -1,0 +1,7 @@
+{
+  "note": "Bundled device-frame SVGs, each following the body/screen/overlay contract (references/device-frames.md, engine.js's loadDeviceSVG). Schema per entry: { file, sourceUrl, license, author }. An official Apple bezel PNG is never listed here -- Apple's Design Resources licence forbids redistribution (references/device-frames.md); those stay in a user-level or project-level library the tools find at build time, never in the skill.",
+  "devices": [
+    { "file": "iphone-frame.svg", "sourceUrl": "Figma Community file (URL not recorded)", "license": "Free-use community resource; terms verified by the repository owner", "author": "not recorded" },
+    { "file": "macbook-frame.svg", "sourceUrl": "Figma Community file (URL not recorded)", "license": "Free-use community resource; terms verified by the repository owner", "author": "not recorded" }
+  ]
+}

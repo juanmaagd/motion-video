@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>motion-video</title>
+<style>
+  html, body { margin: 0; background: var(--bg, #fff); }
+  #stage { position: relative; overflow: hidden; background: var(--bg); color: var(--ink);
+    font-family: var(--font-display); font-kerning: normal; -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
+  .abs { position: absolute; left: 0; top: 0; }
+  .shot { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .nowrap { white-space: nowrap; }
+  .mono { font-family: var(--font-mono); }
+  .label { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.12em; }
+  svg { overflow: visible; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script type="module">
+// Starter composition. Replace the demo scenes with the storyboard; keep the contract:
+// every scene is { init(app), render(t) } and render(t) depends on t only.
+import * as K from "./engine.js";
+const { E, clamp, lerp, prog, h, s, show, px, tf, zoomAbout } = K;
+
+const tl = await K.loadTimeline();
+const brand = await K.loadBrand();
+const fontsLoaded = await K.loadFonts(brand);
+const logo = await K.loadLogo(brand);
+const app = K.createStage(tl, brand);
+const { W, H, C, FPS } = tl;
+const F = app.frame, u = F.u;
+const col = brand.colors;
+const copy = {
+  headline: [["Motion", 400], ["from", 400], ["pure", 600], ["code.", 600]],
+  caption: "Rendered from code · every frame f(t)",
+  featuresTitle: ["Built for ", "the beat."],
+  features: ["Deterministic frames", "Real motion blur", "Beat-synced sound"],
+  tagline: ["Your story, ", "on the beat."],
+  hud: ["Motion video", "Made with code"],
+  ...brand.copy,
+};
+
+// The camera is never parked. A continuous drift (zoom fixed at 1, so no re-centring math is
+// needed -- see engine.js run()'s `camera` doc) runs under the whole film, including the final
+// hold; every scene sits inside it. (pitfall 59) The swing is sized to keep velocity above
+// ~20-25 px/s throughout -- a slower drift can round to sub-pixel, sometimes bit-identical,
+// consecutive frames once captured and encoded, which defeats the point.
+const camera = K.cameraTrack([
+  [0, 0, 0, 1], [0.5, 22, -15, 1], [1.6, 40, -25, 1], [3.6, -35, 30, 1], [5.6, 30, -20, 1], [tl.duration, -20, 25, 1],
+]);
+// Grain, drawn last, composited normally (never a CSS blend mode). Doubles as one of the ways
+// the lag proof's still-run check gets real per-frame signal even where the picture itself pauses.
+const grainCanvas = h("canvas", { width: W, height: H, class: "abs shot", style: { pointerEvents: "none" } }, app.stage);
+const grain = K.createGrain(grainCanvas, W, H, FPS);
+
+// ================================================================== HUD ====
+// A hairline frame with mono corner labels: a static anchor while the shots move.
+const Hud = {
+  init({ cam }) {
+    this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam);
+    const g = s("svg", { width: W, height: H, class: "abs" }, this.el);
+    const st = { stroke: col.hairline, "stroke-width": 1.5, "shape-rendering": "crispEdges" };
+    this.lines = [0, 1, 2, 3].map(() => s("line", st, g));
+    this.labels = copy.hud.map((txt, i) => {
+      const e = h("div", { class: "label abs nowrap", style: { fontSize: px(15 * u), color: col.muted, top: px(F.y0 * 0.42) } }, this.el);
+      if (i) { e.style.left = "auto"; e.style.right = px(F.x0 + 24 * u); } else e.style.left = px(F.x0 + 24 * u);
+      return { e, txt: txt.toUpperCase() };
+    });
+  },
+  render(t) {
+    if (!show(this.el, t >= C.drop)) return;
+    const p = E.outExpo(prog(t, C.drop + 0.04, 0.7));
+    const [a, b, c, d] = this.lines;
+    for (const [ln, x] of [[a, F.x0], [b, F.x1]]) { ln.setAttribute("x1", x); ln.setAttribute("x2", x); ln.setAttribute("y1", H / 2 - (H / 2 + 20) * p); ln.setAttribute("y2", H / 2 + (H / 2 + 20) * p); }
+    for (const [ln, y] of [[c, F.y0], [d, F.y1]]) { ln.setAttribute("y1", y); ln.setAttribute("y2", y); ln.setAttribute("x1", W / 2 - (W / 2 + 20) * p); ln.setAttribute("x2", W / 2 + (W / 2 + 20) * p); }
+    this.labels.forEach((l, i) => { l.e.textContent = K.decode(l.txt, prog(t, C.drop + 0.2 + i * 0.1, 0.45), 7 + i, t, FPS); });
+  },
+};
+
+// ========================================================= 1 TITLE SLAM ====
+// Ink field; a hairline draws; the headline rises out of the line on the beats with a
+// variable-font punch; everything folds back into the line, which snaps vertical.
+// On the drop the field splits like doors (match cut into the next scene).
+const Title = {
+  init({ cam }) {
+    const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
+    // full-frame backgrounds bleed 40 px past the edges so camera shake never shows the stage
+    this.left = h("div", { class: "abs", style: { background: col.ink, top: "-40px", height: px(H + 80) } }, el);
+    this.right = h("div", { class: "abs", style: { background: col.ink, top: "-40px", height: px(H + 80) } }, el);
+    this.line = h("div", { class: "abs", style: { background: col.bg } }, el);
+    this.clip = h("div", { class: "abs", style: { overflow: "hidden", left: px(F.x0), width: px(F.cw + 40 * u) } }, el);
+    this.head = h("div", { class: "abs nowrap", style: { color: col.bg, lineHeight: 1, letterSpacing: "-0.02em" } }, this.clip);
+    this.words = copy.headline.map(([w, wt], i, a) =>
+      h("span", { text: w, style: { display: "inline-block", fontWeight: wt, marginRight: i < a.length - 1 ? "0.24em" : "0" } }, this.head));
+    this.fs = K.fitFont(this.head, F.cw);
+    const base = K.baselineOf(this.head);
+    this.boxH = Math.ceil(this.fs * 1.25);
+    this.clip.style.top = px(F.cy - this.boxH);
+    this.clip.style.height = px(this.boxH);
+    this.head.style.top = px(this.boxH - this.fs * 0.235 - base); // descenders clear the line
+    this.cap = h("div", { class: "abs mono nowrap", style: { left: px(F.x0), top: px(F.cy + 22 * u), fontSize: px(19 * u), letterSpacing: "0.06em", color: col.muted } }, el);
+    this.cues = ["word1", "word2", "word3", "word4"].map((n) => C[n]);
+    // A static hold before a drop looks dead. A hairline ring closes onto the gap between
+    // "turn" and "drop" (there is no still hold to fix here -- the ring is cheap insurance and a
+    // second demonstration of the helper next to DOT-style usage documented in scene-recipes.md).
+    this.ringSvg = s("svg", { width: W, height: H, class: "abs" }, el);
+    this.ring = K.anticipationRing(this.ringSvg, { color: col.bg, startRadius: Math.hypot(W, H) * 0.6 });
+  },
+  render(t) {
+    if (!show(this.el, t < C.drop + 0.5)) return;
+    // doors: after the drop the line is the gap between two ink panels
+    const d = t - C.drop;
+    const gap = d < 0 ? 0 : lerp(2, W + 40, clamp(K.punch(d, 1.2, 0.7)));
+    Object.assign(this.left.style, { left: "-40px", width: px(Math.max(W / 2 - gap / 2 + 40, 0)) });
+    Object.assign(this.right.style, { left: px(W / 2 + gap / 2), width: px(W / 2 + 40) });
+    // hairline: point -> full width -> gulp -> rotate to vertical
+    const pop = E.outBack(prog(t, 0, 0.12), 2.6);
+    const st = E.outExpo(prog(t, C.open + 0.117, 0.55));
+    const lw = lerp(10 * u * pop, W + 60, st);
+    let lh = lerp(10 * u * pop, 2, E.outExpo(prog(t, C.open + 0.117, 0.22)));
+    const gulp = prog(t, C.collapse + 0.06, 0.16);
+    lh += 4 * Math.sin(Math.PI * gulp) * (1 - gulp);
+    const rot = 90 * E.outBack(prog(t, C.turn + 0.02, 0.17), 1.3);
+    Object.assign(this.line.style, { left: px(W / 2 - lw / 2), top: px(F.cy - lh / 2), width: px(lw), height: px(lh),
+      transform: `rotate(${rot}deg)`, display: d < 0 ? "" : "none" });
+    this.words.forEach((sp, i) => {
+      const c = this.cues[i] ?? this.cues[this.cues.length - 1];
+      const up = E.outExpo(prog(t, c, 0.5));
+      const down = E.inCubic(prog(t, C.collapse + (this.words.length - 1 - i) * 0.014, 0.1));
+      sp.style.transform = `translateY(${((1 - up) + down) * this.boxH * 1.05}px)`;
+      if (copy.headline[i][1] >= 600) {
+        const k = E.outCubic(prog(t, c, 0.6));
+        sp.style.fontVariationSettings = `"wght" ${lerp(900, copy.headline[i][1], k)}, "wdth" ${lerp(125, 100, k)}`;
+      }
+    });
+    this.clip.style.display = d < 0 ? "" : "none";
+    this.cap.textContent = K.decode(copy.caption.toUpperCase(), prog(t, C.word1 - 0.35, 0.4), 3, t, FPS);
+    this.cap.style.opacity = 1 - E.inCubic(prog(t, C.collapse, 0.1));
+    this.ring.render(t, C.turn, C.drop, [W / 2, F.cy]);
+  },
+};
+
+// ====================================================== 2 KINETIC LIST ====
+// Revealed by the doors. A mixed-weight title, then one row per beat: the text rises inside
+// its row, the check draws. Exits with a whip zoom into the last check.
+const Features = {
+  init({ cam }) {
+    const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
+    this.rh = Math.round(118 * u);
+    const n = copy.features.length;
+    const fsT = 64 * u;
+    this.top = F.cy - ((n * this.rh) + fsT * 1.6) / 2;
+    // Headline sequencer: readable-time guard + guaranteed exit-before-next-entry. (The mixed
+    // weight look of the original two-segment title -- plain + bold -- is documented as its own
+    // recipe in references/scene-recipes.md for projects that want it; this demo shows the plain
+    // single-weight path through makeHeadline().)
+    this.title = K.makeHeadline(el, copy.featuresTitle.join(""), { size: fsT, weight: 600 });
+    Object.assign(this.title.el.style, { left: px(F.x0), top: px(this.top), width: px(F.cw) });
+    this.rows = copy.features.map((txt, i) => {
+      const row = h("div", { class: "abs", style: { left: px(F.x0), top: px(this.top + fsT * 1.6 + i * this.rh), width: px(F.cw), height: px(this.rh),
+        overflow: "hidden", borderTop: `1.5px solid ${col.hairline}` } }, el);
+      const ic = K.icon("pass", 54 * u, row, { left: 0, top: px((this.rh - 54 * u) / 2), color: col.ink });
+      const tx = h("div", { class: "abs nowrap", text: txt, style: { left: px(84 * u), top: px(this.rh / 2 - 40 * u), fontSize: px(58 * u), lineHeight: 1.35, letterSpacing: "-0.02em" } }, row);
+      return { row, ic, tx, cue: C[`item${i + 1}`] };
+    });
+    // whip target: an empty spot inside the last check ring (above the tick), so the hit frame is clean
+    const g = (54 * u) / 18, iy = (this.rh - 54 * u) / 2;
+    this.focus = [F.x0 + 7.2 * g, this.top + fsT * 1.6 + (n - 1) * this.rh + iy + 5.2 * g];
+  },
+  render(t) {
+    if (!show(this.el, t >= C.drop - 0.05 && t < C.lock)) return;
+    this.title.render(t, C.drop + 0.12, C.lock - 0.3);
+    for (const r of this.rows) {
+      const d = t - r.cue + 0.06; // land on the beat, not after it
+      r.row.style.opacity = E.outCubic(prog(d, 0, 0.12));
+      r.tx.style.transform = `translateY(${(1 - E.outExpo(prog(d, 0.03, 0.55))) * this.rh}px)`;
+      r.ic.querySelector(".ring").setAttribute("stroke-dashoffset", 1 - E.outCubic(prog(d, 0.02, 0.28)));
+      r.ic.querySelector(".tick").setAttribute("stroke-dashoffset", 1 - E.outCubic(prog(d, 0.14, 0.2)));
+    }
+    // whip: log-space zoom into the last check, accelerating into the hit
+    const k = Math.exp(Math.log(70) * E.inExpo(prog(t, C.lock - 0.3, 0.3)));
+    zoomAbout(this.el, k, this.focus[0], this.focus[1]);
+    this.el.style.opacity = 1 - prog(t, C.lock - 0.06, 0.06);
+  },
+};
+
+// ======================================================= 3 LOGO LOCKUP ====
+// The mark pops on the hit (starting 30 ms early so the hit frame shows it), slides aside
+// while the wordmark slides out from behind it, then the tagline; slow push to the end.
+const Lockup = {
+  init({ cam }) {
+    const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
+    this.L = (F.portrait ? 150 : 132) * u;           // mark height
+    this.markBox = h("div", { class: "abs" }, el);
+    if (logo) {
+      logo.svg.setAttribute("width", "100%"); logo.svg.setAttribute("height", "100%");
+      this.markBox.appendChild(logo.svg);
+      this.aspect = logo.aspect;
+    } else {
+      this.markBox.appendChild(s("svg", { viewBox: "0 0 100 100", width: "100%", height: "100%" }))
+        .appendChild(s("circle", { cx: 50, cy: 50, r: 50, fill: col.ink }));
+      this.aspect = 1;
+    }
+    this.wmClip = h("div", { class: "abs", style: { overflow: "hidden" } }, el);
+    this.wm = h("div", { class: "abs nowrap", text: brand.wordmark, style: { fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1, color: col.ink } }, this.wmClip);
+    this.wm.style.fontSize = px(this.L * 0.95);
+    const mw = this.L * this.aspect, gap = this.L * 0.3, ww = this.wm.getBoundingClientRect().width;
+    const total = mw + gap + ww, scale = Math.min(1, F.cw / total);
+    Object.assign(this, { mw: mw * scale, gap: gap * scale, ww: ww * scale, sc: scale });
+    this.wm.style.fontSize = px(this.L * 0.95 * scale);
+    this.Ls = this.L * scale;
+    this.x0 = W / 2 - (this.mw + this.gap + this.ww) / 2;
+    this.cy = F.cy - 30 * u;
+    const base = K.baselineOf(this.wm), fsW = this.L * 0.95 * scale;
+    this.wmTop = this.cy - base + fsW * 0.36;           // cap band centred on the mark
+    const fsTag = 44 * u;
+    this.tagClip = h("div", { class: "abs", style: { left: px(this.x0), top: px(this.cy + this.Ls * 0.75), overflow: "hidden", height: px(fsTag * 1.45) } }, el);
+    this.tag = h("div", { class: "nowrap", html: `${copy.tagline[0]}<strong style="font-weight:600">${copy.tagline[1]}</strong>`,
+      style: { fontSize: px(fsTag), lineHeight: 1.4, letterSpacing: "-0.02em" } }, this.tagClip);
+  },
+  // Pure box math shared by render() and window.__logoBox (build.mjs's logo-fidelity hook, see
+  // brandqa.mjs): the exact on-screen box the mark occupies at t, or null when it is not shown yet.
+  boxAt(t) {
+    if (t < C.lock - 0.04) return null;
+    const pop = K.punch(t - C.lock + 0.03, 4.5, 0.55);
+    const slide = E.outExpo(prog(t, C.wordmark, 0.85));
+    const size = Math.max(this.Ls * pop, 0.01), mw = size * this.aspect;
+    const cx = lerp(W / 2, this.x0 + this.mw / 2, slide);
+    return { x: cx - mw / 2, y: this.cy - size / 2, w: mw, h: size, cx, mw, size, slide };
+  },
+  render(t) {
+    const box = this.boxAt(t);
+    if (!show(this.el, !!box)) return;
+    const { cx, mw, size, slide } = box;
+    Object.assign(this.markBox.style, { left: px(cx - mw / 2), top: px(this.cy - size / 2), width: px(mw), height: px(size) });
+    // clip starts at the mark's right edge; the wordmark slides out from behind it
+    const edge = cx + mw / 2 + 1;
+    Object.assign(this.wmClip.style, { left: px(edge), top: px(this.wmTop - this.Ls), width: px(Math.max(W - edge, 0)), height: px(this.Ls * 3) });
+    const finalLeft = this.x0 + this.mw + this.gap;
+    this.wm.style.left = px(finalLeft - edge + lerp(W / 2 - (finalLeft + this.ww), 0, slide));
+    this.wm.style.top = px(this.Ls);
+    const tp = E.outExpo(prog(t, C.tagline, 0.7));
+    this.tag.style.transform = `translateY(${(1 - tp) * 100}%)`;
+    zoomAbout(this.el, 1 + 0.028 * E.inOutSine(prog(t, C.wordmark, tl.DUR - C.wordmark)), W / 2, H / 2);
+  },
+};
+
+await K.run(app, [Hud, Features, Lockup, Title], {
+  shakes: [[C.drop, 8 * u, 9], [C.lock, 5 * u, 11]],
+  camera,
+  post: (t) => grain.render(t),
+});
+window.__fonts = fontsLoaded;
+// build.mjs's logo-fidelity hook (brandqa.mjs / logoqa.py): the exact box the mark occupies at t.
+window.__logoBox = (t) => {
+  const b = Lockup.boxAt(t);
+  return b && { x: b.x, y: b.y, w: b.w, h: b.h };
+};
+</script>
+</body>
+</html>
