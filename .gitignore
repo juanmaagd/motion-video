@@ -1,0 +1,13 @@
+# Dependencies and caches (never inside the skill folder either: `npx skills add`
+# copies the whole skill folder, so anything left there ships to every install)
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Render outputs of a template copy (the skill itself ships none of these)
+out/
+frames/
+renders/
+*.mp4
+*.wav
