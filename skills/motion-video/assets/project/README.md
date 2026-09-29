@@ -8,6 +8,7 @@ A short motion-graphics video rendered from code: every frame is `renderAt(t)` i
 npm install                      # playwright-core only; browsers come from the Playwright cache or CHROME_PATH
 python3 -m pip install -r requirements.txt   # numpy, Pillow (used by qa.py, sheet.py, detect-frame.py, logoqa.py)
 npm run stills                   # one still per beat -> out/stills (half size)
+npm run studio                   # live preview at http://127.0.0.1:4321: the composition reloads on every save, audio is regenerated from score.mjs
 npm run preview                  # fast pass: 1 sample, half size -> out/<slug>-preview.mp4 + contact sheet + QA
 npm run build                    # final: 32 motion-blur samples, full size -> <slug>.mp4 + web.mp4 + poster + contact sheet + QA
 node build.mjs --slice=3.5:4.5   # final settings on one moment
@@ -45,6 +46,7 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 | `archive.sh` | no | snapshot outputs + source (sans `node_modules`) into `vN/` before a revision. |
 | `determinism.mjs` | no | forward vs reversed frame-order capture must be pixel-identical. |
 | `serve.mjs` | no | the static file server behind `render.mjs` and `determinism.mjs`: GET/HEAD only, contained to this folder by real path (no `..`, no symlink out), no dotfiles or `node_modules`. |
+| `studio.mjs`, `studio.html` | no | the live preview: a 127.0.0.1-only server (per-run token, Host and Origin checks on every write) that watches this folder, pushes reloads over server-sent events and regenerates the audio from `score.mjs`, and the page it serves. |
 | `gen-image.mjs` | no | optional: one raster plate/texture via the Codex CLI's own built-in image tool, no fallback; records `generated/manifest.json`. |
 | `generated/` | maybe | `manifest.json` (empty by default) + any files `gen-image.mjs` writes. |
 

@@ -110,3 +110,38 @@ export function linkDeps(projectDir) {
   if (!dir) throw new Error("playwright-core not found for the assembled project");
   fs.symlinkSync(path.join(path.resolve(dir), "node_modules"), path.join(projectDir, "node_modules"), "dir");
 }
+
+// Server-sent events client. Keeps every event in arrival order; `wait` finds one by name.
+export function connectSSE(port, { path: p = "/__events", host = "127.0.0.1" } = {}) {
+  const events = [];
+  let buffer = "";
+  let res;
+  const req = http.get({ host, port, path: p, agent: false, headers: { accept: "text/event-stream" } });
+  const ready = new Promise((resolve, reject) => {
+    req.on("response", (r) => {
+      res = r;
+      if (r.statusCode !== 200) return reject(new Error(`SSE connect: HTTP ${r.statusCode}`));
+      r.setEncoding("utf8");
+      r.on("data", (chunk) => {
+        buffer += chunk;
+        for (let cut; (cut = buffer.indexOf("\n\n")) >= 0;) {
+          const block = buffer.slice(0, cut);
+          buffer = buffer.slice(cut + 2);
+          const event = /^event: (.*)$/m.exec(block)?.[1];
+          const data = /^data: (.*)$/m.exec(block)?.[1];
+          if (event) events.push({ event, data: data ? JSON.parse(data) : null, at: Date.now() });
+        }
+      });
+      resolve();
+    });
+    req.on("error", reject);
+  });
+  return {
+    events, ready,
+    mark: () => events.length,
+    count: (name, after = 0) => events.slice(after).filter((e) => e.event === name).length,
+    wait: (name, { after = 0, timeout = 5000 } = {}) =>
+      waitFor(() => events.slice(after).find((e) => e.event === name), { timeout, what: `SSE event "${name}" (saw: ${events.slice(after).map((e) => e.event).join(", ") || "nothing"})` }),
+    close: () => { req.destroy(); res?.destroy(); },
+  };
+}

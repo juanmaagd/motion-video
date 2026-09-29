@@ -20,7 +20,7 @@ skills/                                      # THE install surface: each folder 
 ├── motion-video-engine/                     # scenes and render pipeline
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # motion-craft, scene-recipes, pitfalls
-│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, serve.mjs, timeline.json
+│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, serve.mjs, studio.mjs, studio.html, timeline.json
 ├── motion-video-sound/                      # the synthesized score
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # sound-design, pitfalls

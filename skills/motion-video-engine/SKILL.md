@@ -12,7 +12,7 @@ metadata:
 
 ## Activation Contract
 
-Loaded by `motion-video` when the project is assembled and while scenes are written, previewed and rendered. It owns the project files `index.html`, `engine.js`, `render.mjs`, `build.mjs`, `determinism.mjs`, `serve.mjs` and `timeline.json` (their `assets/project/` folder is copied into the video project).
+Loaded by `motion-video` when the project is assembled and while scenes are written, previewed and rendered. It owns the project files `index.html`, `engine.js`, `render.mjs`, `build.mjs`, `determinism.mjs`, `serve.mjs`, `studio.mjs`, `studio.html` and `timeline.json` (their `assets/project/` folder is copied into the video project).
 
 ## Hard Rules
 
@@ -20,7 +20,7 @@ Loaded by `motion-video` when the project is assembled and while scenes are writ
 2. Never composite a layer with a CSS blend mode. Prove any new canvas, filter or shared-state layer with `npm run determinism` (forward and reversed capture must be pixel-identical).
 3. Duration is whole bars (`bpm = 240 × bars / duration`); every cue lives in `timeline.json`, and no time is hard-coded in a scene.
 4. Motion is never stepped or parked: no quantized position or scale, a camera track under the whole film, and no still run except a declared hold of at most 0.3 s with something still moving.
-5. Tool files (`engine.js`, `render.mjs`, `build.mjs`, `determinism.mjs`, `serve.mjs`) stay untouched per video; a video edits `index.html` and `timeline.json`.
+5. Tool files (`engine.js`, `render.mjs`, `build.mjs`, `determinism.mjs`, `serve.mjs`, `studio.mjs`, `studio.html`) stay untouched per video; a video edits `index.html` and `timeline.json`.
 6. Final renders use 32 motion-blur samples (`--sub=32`); previews use 1.
 7. Fonts are loaded before any scene `init`; text is measured there and positions are derived from it.
 
