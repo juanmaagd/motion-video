@@ -8,6 +8,7 @@ This file is for agents working ON the skills (maintaining them), not for agents
 
 ```
 CLAUDE.md, README.md, LICENSE, .gitignore   # repo-only: never shipped to installers
+.claude-plugin/marketplace.json              # repo-only: groups the five skills as one plugin; its `skills` list must match the folders below
 skills/                                      # THE install surface: each folder is copied verbatim by `npx skills add`
 ├── motion-video/                            # director: intake, storyboard, assembly, review loop, delivery
 │   ├── SKILL.md, LICENSE                    # every skill folder has these two; LICENSE is an identical copy of the root one
@@ -79,7 +80,8 @@ for d in skills/*/; do uvx --from skills-ref agentskills validate "$d" || echo "
 for f in $(fd -e js -e mjs . skills); do node --check "$f" || echo "FAIL $f"; done
 for f in $(fd -e py . skills); do python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$f" || echo "FAIL $f"; done
 for f in $(fd -e sh . skills); do bash -n "$f" || echo "FAIL $f"; done
-for f in $(fd -e json . skills); do node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" || echo "FAIL $f"; done
+for f in $(fd -e json . skills) .claude-plugin/marketplace.json; do node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" || echo "FAIL $f"; done
+claude plugin validate .    # the marketplace manifest, when the Claude Code CLI is available
 
 # 3. Collision check, then the five-skill assembly runs from a fresh copy (never inside the repo: node_modules would land in the install surface)
 fd -H -t f . skills/*/assets/project | sd '.*/assets/project/' '' | sort | uniq -d    # expect nothing
@@ -89,7 +91,7 @@ for s in motion-video motion-video-engine motion-video-sound motion-video-qa mot
 
 # 4. Install parity: in a throwaway directory, project scope, telemetry off
 DISABLE_TELEMETRY=1 npx -y skills add <path-to-this-repo> --agent claude-code --copy -y
-#    It must detect exactly FIVE skills, and for each installed skill the file list must equal `git ls-files skills/<name>`.
+#    It must detect exactly FIVE skills (with the marketplace manifest present), and for each installed skill the file list must equal `git ls-files skills/<name>`.
 
 # 5. Nothing private or stray
 rg -n -i "/Users/|/home/|@gmail|confirmed by the user" skills README.md   # expect 0 hits
