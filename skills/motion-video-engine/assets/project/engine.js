@@ -101,6 +101,8 @@ export function createStage(tl, brand) {
 }
 
 // Mounts scenes ({ init(app), render(t) }) in order and defines window.renderAt(t).
+// A scene may also carry a `name` (shown by the studio) and expose its root element as `el` (what
+// window.__state(t) reads to say which scenes are on screen).
 // shakes: [[t0, amplitudePx, decayPerSecond]]; flashes: [[t0, color, [opacity per frame...]]].
 // camera (optional): a track (e.g. from cameraTrack()) whose .at(t) returns [x, y, zoom] to
 // apply to `cam` every frame (transform-origin is 0 0, so zoom != 1 needs x/y already computed to
@@ -130,6 +132,27 @@ export async function run(app, scenes, { shakes = [], flashes = [], camera, post
     flash.style.background = fc;
     flash.style.opacity = fo;
     if (post) post(t);
+  };
+  // window.__state(t): what the composition is doing at t, as data -- for the studio's readout, and
+  // for anything that needs to name what is on screen. It reads and paints nothing else, so renderAt is
+  // unchanged. bar/beat/cue/next come from the timeline alone. `scenes` lists the scenes whose root
+  // element (`el`) is displayed, i.e. the DOM as of the last renderAt: call renderAt(t) first when it
+  // must describe t. Defined before __ready, which is the signal that every hook exists.
+  const cueList = tl.cues.map((c) => ({ name: c.name, t: tl.B(c.beat) })).sort((a, b) => a.t - b.t);
+  window.__state = (t) => {
+    t = clamp(t, 0, tl.DUR - 1e-6);
+    const x = t - tl.B(1), eps = 1e-9;
+    const cue = cueList.filter((c) => c.t <= t + eps).pop() ?? null;
+    const next = cueList.find((c) => c.t > t + eps) ?? null;
+    return {
+      t, frame: frameOf(t, tl.FPS),
+      bar: x < 0 ? 0 : Math.floor(x / tl.BAR + eps) + 1,               // 1-based; 0 before the first beat
+      beat: x < 0 ? 0 : Math.min(4, Math.floor((x % tl.BAR) / tl.BEAT + eps) + 1),
+      cue: cue && { name: cue.name, t: cue.t },
+      next: next && { name: next.name, in: next.t - t },
+      scenes: scenes.flatMap((sc, index) => (sc.el instanceof Element && sc.el.isConnected && (sc.el.checkVisibility?.() ?? sc.el.style.display !== "none")
+        ? [{ index, name: sc.name ?? `scene${index}` }] : [])),
+    };
   };
   window.__ready = true;
   const q = new URLSearchParams(location.search).get("t");

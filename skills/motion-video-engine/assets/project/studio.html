@@ -6,23 +6,452 @@
 <meta name="studio-token" content="__STUDIO_TOKEN__">
 <title>studio</title>
 <style>
-  :root { color-scheme: dark; }
-  body { margin: 0; padding: 24px; background: #15171a; color: #d7dae0; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  h1 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
-  li { list-style: none; }
-  ul { padding: 0; margin: 0; }
+  :root { color-scheme: dark; --bg: #141518; --panel: #1b1d21; --line: #2a2d33; --ink: #d8dbe1; --muted: #8b909a; --accent: #7aa2f7; --bad: #f7768e; --good: #9ece6a; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--bg); color: var(--ink); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  button, input { font: inherit; color: inherit; }
+  header, footer { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); }
+  header { border-bottom: 1px solid var(--line); }
+  footer { border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .pill { color: var(--muted); }
+  .pill.ok { color: var(--good); }
+  .pill.bad { color: var(--bad); }
+  .grow { flex: 1 1 0; min-width: 0; }
+  label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; }
+  button { padding: 5px 12px; background: #262a30; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  button:hover { border-color: #3a3f47; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); }
+  #scrub { flex: 1 1 260px; min-width: 120px; }
+  #latency { width: 110px; }
+  #viewport { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; }
+  #stack { position: relative; background: #0b0c0e; box-shadow: 0 0 0 1px var(--line); }
+  #stack iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: #fff; }
+  #overlay { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; background: rgba(20, 21, 24, 0.72); }
+  #overlay .box { max-width: min(90vw, 900px); padding: 14px 18px; background: var(--panel); border: 1px solid var(--bad); border-radius: 6px; }
+  #overlay pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; color: var(--ink); font: inherit; }
+  #overlay h2 { margin: 0; font-size: 13px; color: var(--bad); }
+  #readout { display: flex; flex-wrap: wrap; gap: 4px 18px; width: 100%; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #readout b { color: var(--ink); font-weight: 600; }
+  .keys { color: var(--muted); font-size: 11px; }
 </style>
 </head>
 <body>
-<h1>studio: connected to the server</h1>
-<ul id="log"></ul>
+<header>
+  <strong id="name">studio</strong>
+  <span id="conn" class="pill">connecting</span>
+  <span id="audio" class="pill">audio: none yet</span>
+  <span class="grow"></span>
+  <label title="Shift the picture against the sound. Raise it if the picture is ahead of what you hear (Bluetooth outputs can need 100 ms or more).">audio latency
+    <input id="latency" type="range" min="-100" max="500" step="5" value="0" aria-label="audio latency offset in milliseconds"><output id="latencyOut">0 ms</output>
+  </label>
+</header>
+
+<main id="viewport">
+  <div id="stack"></div>
+  <div id="overlay" hidden role="alert"><div class="box"><h2 id="errTitle"></h2><pre id="errBody"></pre></div></div>
+</main>
+
+<footer>
+  <button id="play" aria-label="play or pause">Play</button>
+  <input id="scrub" type="range" min="0" max="0" step="1" value="0" aria-label="frame">
+  <button id="loop" aria-pressed="false" title="Loop the whole video, or the range given as ?loop=a:b">Loop</button>
+  <div id="readout">
+    <span><b id="rt">0.000</b> s</span>
+    <span>frame <b id="rf">0</b>/<span id="rfl">0</span></span>
+    <span>bar.beat <b id="rb">-</b></span>
+    <span>cue <b id="rc">-</b></span>
+    <span>next <b id="rn">-</b></span>
+    <span>scenes <b id="rs">-</b></span>
+  </div>
+  <div class="keys">Space play/pause · ←/→ frame · Shift+←/→ beat · L loop · URL: ?t=3.5 &amp; ?loop=2:4</div>
+</footer>
+
 <script>
-// Placeholder shell: shows the server's events. The player replaces this page.
-const log = document.getElementById("log");
-const es = new EventSource("/__events");
-for (const name of ["hello", "reload", "audio-stale", "audio-ready", "audio-error"]) {
-  es.addEventListener(name, (e) => { const li = document.createElement("li"); li.textContent = `${name} ${e.data}`; log.prepend(li); });
+"use strict";
+// The player. It lives here, in the parent page: the composition (index.html) runs in an iframe and
+// is only ever driven through window.renderAt(t), so nothing in index.html knows the studio exists.
+// t is owned by this page. Playback is a requestAnimationFrame loop here that reads a clock -- the Web
+// Audio clock when the soundtrack is loaded, performance.now() otherwise -- and paints with renderAt.
+
+const $ = (id) => document.getElementById(id);
+const READY_TIMEOUT_MS = Number(new URLSearchParams(location.search).get("readyTimeout")) || 5000;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* private window: the setting just is not remembered */ } },
+};
+
+const S = {
+  tl: null, queried: false, scale: 1, t: 0, playing: false, starting: false, loop: false, loopA: 0, loopB: 0,
+  frameEl: null, rendered: null, loads: 0, error: null, run: null, raf: 0,
+  ctx: null, audioBuffer: null, source: null, clock: null, latencyMs: 0, wasPlaying: false,
+};
+
+// ------------------------------------------------------------------ timeline math ----
+const frames = () => Math.round(S.tl.fps * S.tl.duration);
+const lastT = () => (frames() - 1) / S.tl.fps;
+const clampT = (t) => Math.min(Math.max(t, 0), lastT());
+const frameOf = (t) => Math.round(t * S.tl.fps);
+const snap = (t) => clampT(frameOf(t) / S.tl.fps);
+
+function applyTimeline(tl) {
+  for (const k of ["fps", "width", "height", "duration"]) {
+    if (!(Number(tl?.[k]) > 0)) throw new Error(`timeline.json needs a positive "${k}"`);
+  }
+  S.tl = tl;
+  const scrub = $("scrub");
+  scrub.max = String(frames() - 1);
+  $("rfl").textContent = String(frames() - 1);
+  $("name").textContent = `studio · ${tl.title || "video"} · ${tl.width}x${tl.height} @ ${tl.fps}`;
+  document.title = `studio · ${tl.title || "video"}`;
+  S.t = clampT(S.t);
+  fit();
 }
+
+// ------------------------------------------------------------------ the composition ----
+const compWindow = () => { try { return S.frameEl && S.frameEl.contentWindow; } catch { return null; } };
+const isReady = (w) => { try { return !!w && w.__ready === true && typeof w.renderAt === "function"; } catch { return false; } };
+
+// The iframe is W x H (the video's own size, so the composition measures itself exactly as it does in
+// a render) and is scaled with a CSS transform to fit the window. Scaling #stage itself would change
+// what init() measures.
+function sizeFrame(f) {
+  f.style.width = `${S.tl.width}px`;
+  f.style.height = `${S.tl.height}px`;
+  f.style.transform = `scale(${S.scale})`;
+}
+function fit() {
+  if (!S.tl) return;
+  const r = $("viewport").getBoundingClientRect();
+  S.scale = Math.max(0.05, Math.min((r.width - 32) / S.tl.width, (r.height - 32) / S.tl.height, 1));
+  $("stack").style.width = `${S.tl.width * S.scale}px`;
+  $("stack").style.height = `${S.tl.height * S.scale}px`;
+  for (const f of $("stack").querySelectorAll("iframe")) sizeFrame(f);
+}
+new ResizeObserver(fit).observe($("viewport"));
+
+function showError(title, detail) {
+  S.error = { title, detail };
+  $("errTitle").textContent = title;
+  $("errBody").textContent = detail;
+  $("overlay").hidden = false;
+}
+function hideError() { S.error = null; $("overlay").hidden = true; }
+
+// Loads index.html into a NEW iframe kept hidden until it is ready, then swaps it in, so a reload never
+// flashes a blank frame. A newer load supersedes an older one. Errors are watched from the moment the
+// new window exists: a polling loop attaches the listeners as soon as the window changes (10 ms), then
+// keeps them for runtime errors. That catches an exception thrown while the composition initialises
+// (a rejected fetch, a throwing scene init). A SYNTAX error is raised at parse time, before any poll can
+// attach, and the browser tells only the page itself, so that case ends at READY_TIMEOUT_MS instead.
+let loadSeq = 0;
+function loadComp(t) {
+  const seq = ++loadSeq;
+  const f = document.createElement("iframe");
+  f.setAttribute("scrolling", "no");
+  f.tabIndex = -1;
+  f.style.visibility = "hidden";
+  sizeFrame(f);
+  $("stack").appendChild(f);
+  const started = performance.now();
+  const seen = new WeakSet();
+  let fatal = null, adopted = false;
+  const report = (title, detail) => { if (adopted) showError(title, detail); else fatal ??= { title, detail }; };
+  const onError = (e) => report(adopted ? "The composition threw" : "index.html threw while loading",
+    `${e.message || e.error || "error"}${e.filename ? `\n${e.filename.split("/").pop()}:${e.lineno}:${e.colno}` : ""}`);
+  const onRejection = (e) => report(adopted ? "Unhandled promise rejection" : "index.html failed while loading", String((e.reason && e.reason.message) || e.reason));
+  f.src = `index.html?t=${encodeURIComponent(t)}`;
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (seq !== loadSeq) { clearInterval(timer); f.remove(); return resolve(false); }
+      let w = null;
+      try { w = f.contentWindow; if (w) void w.document; } catch { w = null; } // cross-origin: Chromium's own error page
+      if (w && !seen.has(w)) { seen.add(w); w.addEventListener("error", onError); w.addEventListener("unhandledrejection", onRejection); }
+      let failure = fatal;
+      if (!failure && performance.now() - started > READY_TIMEOUT_MS) {
+        failure = { title: "index.html did not become ready", detail: `Nothing was ready after ${READY_TIMEOUT_MS / 1000} s. The usual cause is a syntax error in index.html or engine.js (the browser does not report those to this page); others are a missing file or a rejected fetch. The browser console has the exact error, and \`npm run stills\` prints it too.` };
+      }
+      if (isReady(w)) {
+        clearInterval(timer);
+        const old = S.frameEl;
+        f.id = "comp";
+        f.style.visibility = "visible";
+        S.frameEl = f;
+        S.loads++;
+        S.rendered = null;
+        adopted = true;
+        old?.remove();
+        hideError();
+        draw(true);
+        resolve(true);
+      } else if (failure) {
+        clearInterval(timer);
+        f.remove();
+        showError(failure.title, failure.detail);
+        resolve(false);
+      }
+    }, 10);
+  });
+}
+
+// renderAt is looked up on the live window every time: a reload replaces it.
+function renderFrame(t, force) {
+  const w = compWindow();
+  if (!isReady(w)) return false;
+  if (!force && S.rendered === t) return true;
+  try {
+    w.renderAt(t);
+    S.rendered = t;
+    return true;
+  } catch (e) {
+    pause();
+    showError(`renderAt(${t.toFixed(3)}) threw`, String(e && e.stack || e));
+    return false;
+  }
+}
+function stateAt(t) {
+  const w = compWindow();
+  try { return isReady(w) && typeof w.__state === "function" ? w.__state(t) : null; } catch { return null; }
+}
+function draw(force) { renderFrame(S.t, force); updateUI(); }
+
+function updateUI() {
+  if (!S.tl) return;
+  const st = stateAt(S.t);
+  $("scrub").value = String(frameOf(S.t));
+  $("rt").textContent = S.t.toFixed(3);
+  $("rf").textContent = String(frameOf(S.t));
+  $("rb").textContent = st ? `${st.bar}.${st.beat}` : "-";
+  $("rc").textContent = st?.cue ? `${st.cue.name} @ ${st.cue.t.toFixed(3)}` : "-";
+  $("rn").textContent = st?.next ? `${st.next.name} in ${st.next.in.toFixed(2)} s` : "-";
+  $("rs").textContent = st ? st.scenes.map((s) => s.name).join(", ") || "none" : "-";
+}
+
+// ------------------------------------------------------------------------- audio ----
+const AC = window.AudioContext || window.webkitAudioContext;
+const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+function setAudioPill(text, cls = "") { const p = $("audio"); p.textContent = `audio: ${text}`; p.className = `pill ${cls}`; }
+
+let audioSeq = 0;
+async function loadAudio(url) {
+  const seq = ++audioSeq;
+  setAudioPill("loading");
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Decoded on an offline context: no user gesture is needed for that, and an AudioBuffer plays on any context.
+    const buffer = await new OAC(2, 1, 48000).decodeAudioData(await res.arrayBuffer());
+    if (seq !== audioSeq) return;
+    S.audioBuffer = buffer;
+    setAudioPill(`ready · ${buffer.duration.toFixed(1)} s`, "ok");
+    if (S.playing) startClock(S.t); // keep the position, switch to the new soundtrack
+  } catch (e) {
+    if (seq === audioSeq) setAudioPill(`could not load (${e.message})`, "bad");
+  }
+}
+
+function stopSource() {
+  try { S.source?.stop(); S.source?.disconnect(); } catch { /* already stopped */ }
+  S.source = null;
+}
+
+// The clock: with sound, position = where the soundtrack is, minus the output latency the browser
+// reports and the manual offset. Without it (no WAV yet, or the audio clock is not advancing), wall time.
+function startClock(t0) {
+  stopSource();
+  const c = (S.clock = { t0, wall: performance.now(), audio: false, startAt: 0 });
+  const ctx = S.ctx;
+  if (ctx && ctx.state === "running" && S.audioBuffer) {
+    const src = ctx.createBufferSource();
+    src.buffer = S.audioBuffer;
+    src.connect(ctx.destination);
+    c.startAt = ctx.currentTime + 0.02;
+    src.start(c.startAt, Math.min(t0, Math.max(S.audioBuffer.duration - 0.001, 0)));
+    S.source = src;
+    c.audio = true;
+  }
+}
+function playT() {
+  const c = S.clock, ctx = S.ctx;
+  if (c.audio) {
+    const stalled = ctx.state !== "running" || (performance.now() - c.wall > 400 && ctx.currentTime <= c.startAt);
+    if (!stalled) {
+      const latency = (ctx.outputLatency || ctx.baseLatency || 0) + S.latencyMs / 1000;
+      return Math.max(c.t0, c.t0 + (ctx.currentTime - c.startAt) - latency);
+    }
+    stopSource(); // the audio clock is not advancing: carry on from the last painted time on wall time
+    Object.assign(c, { audio: false, t0: S.t, wall: performance.now() });
+  }
+  return c.t0 + (performance.now() - c.wall) / 1000;
+}
+
+// ---------------------------------------------------------------------- transport ----
+function syncButtons() {
+  $("play").textContent = S.playing ? "Pause" : "Play";
+  const loopBtn = $("loop");
+  loopBtn.setAttribute("aria-pressed", String(S.loop));
+  loopBtn.textContent = S.loop && S.loopB - S.loopA < S.tl.duration - 1e-6 ? `Loop ${S.loopA.toFixed(2)}–${S.loopB.toFixed(2)}` : "Loop";
+}
+
+async function play() {
+  if (S.playing || S.starting || !S.tl) return;
+  S.starting = true;
+  try {
+    // The AudioContext must be created and resumed from a user gesture: play() is called from one.
+    S.ctx ??= AC ? new AC() : null;
+    if (S.ctx && S.ctx.state !== "running") await S.ctx.resume().catch(() => {});
+  } finally { S.starting = false; }
+  if (S.playing) return;
+  const end = S.loop ? Math.min(S.loopB, lastT()) : lastT();
+  if (S.t >= end - 1e-6 || (S.loop && S.t < S.loopA)) S.t = S.loop ? S.loopA : 0;
+  S.playing = true;
+  startClock(S.t);
+  S.raf = requestAnimationFrame(tick);
+  syncButtons();
+}
+function pause() {
+  if (!S.playing) return;
+  S.playing = false;
+  cancelAnimationFrame(S.raf);
+  stopSource();
+  S.t = snap(S.t);
+  draw();
+  syncButtons();
+}
+function togglePlay() { return S.playing ? pause() : play(); }
+
+function tick() {
+  if (!S.playing) return;
+  S.raf = requestAnimationFrame(tick);
+  const t = playT();
+  if (t >= (S.loop ? Math.min(S.loopB, lastT()) : lastT())) {
+    if (S.loop) { S.t = S.loopA; startClock(S.t); draw(); return; }
+    S.t = lastT();
+    pause();
+    return;
+  }
+  S.t = t;
+  draw();
+}
+
+function seek(t) {
+  if (!S.tl) return;
+  S.t = clampT(t);
+  if (S.playing) startClock(S.t);
+  draw();
+}
+function step(unit, dir) {
+  if (!S.tl) return;
+  if (S.playing) pause();
+  if (unit === "frame") return seek((frameOf(S.t) + dir) / S.tl.fps);
+  const beat = 60 / S.tl.bpm, offset = S.tl.offset ?? 0, k = (S.t - offset) / beat;
+  const target = dir > 0 ? Math.floor(k + 1e-6) + 1 : Math.ceil(k - 1e-6) - 1;
+  seek(snap(offset + target * beat));
+}
+function setLoop(on) {
+  S.loop = on;
+  if (on && !(S.loopB > S.loopA)) { S.loopA = 0; S.loopB = S.tl.duration; }
+  syncButtons();
+}
+
+$("play").addEventListener("click", (e) => { togglePlay(); e.currentTarget.blur(); });
+$("loop").addEventListener("click", (e) => { setLoop(!S.loop); e.currentTarget.blur(); });
+$("scrub").addEventListener("input", (e) => seek(Number(e.target.value) / S.tl.fps));
+// Dragging the scrubber pauses while the button is down, so audio is not restarted on every pixel.
+$("scrub").addEventListener("pointerdown", () => { S.wasPlaying = S.playing; if (S.playing) pause(); });
+for (const type of ["pointerup", "pointercancel"]) $("scrub").addEventListener(type, (e) => { e.currentTarget.blur(); if (S.wasPlaying) { S.wasPlaying = false; play(); } });
+$("latency").addEventListener("input", (e) => {
+  S.latencyMs = Number(e.target.value);
+  $("latencyOut").textContent = `${S.latencyMs} ms`;
+  store.set("mv-studio-latency-ms", String(S.latencyMs));
+});
+
+// Keys are handled here, on the parent page (the iframe ignores the pointer, so it never takes focus).
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || !S.tl) return;
+  if (e.target.id === "latency" && e.key.startsWith("Arrow")) return; // let the slider use its own arrows
+  if (e.key === " ") togglePlay();
+  else if (e.key === "ArrowLeft" || e.key === "ArrowRight") step(e.shiftKey ? "beat" : "frame", e.key === "ArrowRight" ? 1 : -1);
+  else if (e.key === "l" || e.key === "L") setLoop(!S.loop);
+  else if (e.key === "Home") seek(0);
+  else if (e.key === "End") seek(lastT());
+  else return;
+  e.preventDefault();
+}, true);
+window.addEventListener("keyup", (e) => { if (e.key === " ") e.preventDefault(); }, true); // Space must not also "click" a focused button
+
+// ------------------------------------------------------------------ server events ----
+async function fetchProject() {
+  const r = await fetch("/api/project", { cache: "no-store" });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+  return body;
+}
+
+// The URL's ?t= and ?loop=a:b apply once, when the first timeline has been read.
+function applyQuery() {
+  if (S.queried) return;
+  S.queried = true;
+  const q = new URLSearchParams(location.search);
+  if (q.has("t") && Number.isFinite(Number(q.get("t")))) S.t = clampT(Number(q.get("t")));
+  const [a, b] = (q.get("loop") ?? "").split(":").map(Number);
+  if (Number.isFinite(a) && Number.isFinite(b) && b > a) { S.loopA = Math.max(0, a); S.loopB = Math.min(S.tl.duration, b); S.loop = true; }
+}
+
+// Read the project, then load the composition. Used at start and on every reload event, so a page
+// opened onto an unreadable project recovers by itself once the file is fixed.
+async function reload() {
+  try {
+    applyTimeline((await fetchProject()).timeline);
+    applyQuery();
+    syncButtons();
+  } catch (e) {
+    showError("Cannot read the project", e.message);
+    return;
+  }
+  await loadComp(S.t);
+}
+
+function connectEvents() {
+  const es = new EventSource("/__events");
+  const on = (name, fn) => es.addEventListener(name, (e) => fn(JSON.parse(e.data)));
+  es.onopen = () => { $("conn").textContent = "live"; $("conn").className = "pill ok"; };
+  es.onerror = () => { $("conn").textContent = "server not reachable, retrying"; $("conn").className = "pill bad"; };
+  // A new `run` means the server restarted: this page's token is stale, so load the page again.
+  on("hello", ({ run }) => { if (S.run && S.run !== run) location.reload(); S.run = run; });
+  on("reload", () => reload());
+  on("audio-stale", () => setAudioPill("regenerating"));
+  on("audio-ready", ({ url }) => loadAudio(url));
+  on("audio-error", ({ message }) => setAudioPill(S.audioBuffer ? `${message} (still playing the last good version)` : `no sound: ${message}`, "bad"));
+}
+
+// -------------------------------------------------------------------------- boot ----
+async function boot() {
+  const saved = store.get("mv-studio-latency-ms");
+  if (saved !== null && Number.isFinite(Number(saved))) {
+    S.latencyMs = Math.min(500, Math.max(-100, Number(saved)));
+    $("latency").value = String(S.latencyMs);
+    $("latencyOut").textContent = `${S.latencyMs} ms`;
+  }
+  connectEvents();
+  await reload();
+}
+
+// Automation surface (agents driving the studio with a browser): read-only state plus the transport.
+window.__studio = {
+  get t() { return S.t; },
+  get rendered() { return S.rendered; },
+  get playing() { return S.playing; },
+  get loads() { return S.loads; },
+  get ready() { return isReady(compWindow()); },
+  get error() { return S.error; },
+  get audioSeconds() { return S.audioBuffer ? S.audioBuffer.duration : null; },
+  get audioClock() { return !!(S.playing && S.clock?.audio); },
+  seek, play, pause,
+};
+boot();
 </script>
 </body>
 </html>

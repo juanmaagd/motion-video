@@ -125,6 +125,7 @@ When a change touches rendering, audio or QA, also build the demo in the assembl
 - Official-bezel detection (`detect-frame.py`) on a real Apple export. It has only been tested on synthetic PNGs.
 - The user-library lookup (`$MOTION_VIDEO_ASSETS/devices/`, `.../apple/`) on a real library.
 - A live `gen-image.mjs` run, which spends Codex quota.
+- The studio (`npm run studio`) in Safari and Firefox: only headless Chromium is tested. Audio latency on Bluetooth outputs is also unmeasured; the page's latency offset slider is a manual compensation.
 - Agents other than Claude Code. The intake has a plain-text fallback for runtimes without a question UI, but nobody has exercised it.
 - `motion-video-qa` on an arbitrary MP4: only `lagproof.py` and `inspect.sh` are standalone today; `qa.py` reads the project's `timeline.json` and `brand.json`.
 

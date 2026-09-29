@@ -1,11 +1,11 @@
 ---
 name: motion-video-engine
 description: "Loaded by the `motion-video` director for the render engine of a code-driven video: the renderAt(t) scene contract, easing, timing and camera rules, scene recipes, and the deterministic render and encode pipeline with its pitfalls. Use directly only when the user asks specifically about that engine, its scenes or its render pipeline; not for making a video end to end."
-compatibility: "Node.js 22+; ffmpeg and ffprobe on PATH; a Playwright Chromium headless shell (npx playwright install chromium-headless-shell, or set CHROME_PATH). Runs inside the project assembled by the motion-video director: build.mjs also calls the score (motion-video-sound) and QA (motion-video-qa) files."
+compatibility: "Node.js 22+; ffmpeg and ffprobe on PATH; a Playwright Chromium headless shell (npx playwright install chromium-headless-shell, or set CHROME_PATH); Chrome or Chromium to open `npm run studio`. Runs inside the project assembled by the motion-video director: build.mjs also calls the score (motion-video-sound) and QA (motion-video-qa) files."
 license: Apache-2.0
 metadata:
   author: "juanmaagd"
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Motion Video Engine
@@ -29,7 +29,7 @@ Loaded by `motion-video` when the project is assembled and while scenes are writ
 1. Work only in the assembled project, never in a skill folder.
 2. Set fps, size, duration, bpm and the cues in `timeline.json` from the approved storyboard.
 3. Replace the demo scenes in `index.html` bar by bar, each scene `{ init(app), render(t) }` (`references/scene-recipes.md`, `references/motion-craft.md`).
-4. Check the moment being worked on: `node render.mjs stills --times=1.2,1.9 --scale=0.5`; the whole piece with `npm run stills`; a transition with `--strip=1.80:12 --out=out/strip`.
+4. Check the moment being worked on live with `npm run studio` (scrub, play with the score; every save reloads; `?t=3.5&loop=2:4` opens a moment), or as stills: `node render.mjs stills --times=1.2,1.9 --scale=0.5`; the whole piece with `npm run stills`; a transition with `--strip=1.80:12 --out=out/strip`.
 5. `npm run preview` (1 sample, half size), then `npm run build` (32 samples, full size; QA runs inside it). Budget: about 13 s of wall time per rendered second of 1080p60 on 8 workers.
 6. Run `npm run determinism` after any canvas, SVG-filter or shared-state change.
 7. Check `references/pitfalls.md` at every review pass.

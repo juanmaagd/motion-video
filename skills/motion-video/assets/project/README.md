@@ -50,4 +50,4 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 | `gen-image.mjs` | no | optional: one raster plate/texture via the Codex CLI's own built-in image tool, no fallback; records `generated/manifest.json`. |
 | `generated/` | maybe | `manifest.json` (empty by default) + any files `gen-image.mjs` writes. |
 
-Open a single frame in a browser: serve this folder (`npx serve .`) and load `index.html?t=2.3`.
+Open a single frame in a browser: `npm run studio` and load `http://127.0.0.1:4321/?t=2.3` (Chrome or Chromium; `?loop=2:4` loops a range).
