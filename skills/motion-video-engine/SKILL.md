@@ -43,3 +43,4 @@ Return, per bar, what was built; the render commands run and their wall time; th
 - `references/motion-craft.md`: easing, timing, camera, type, motion blur, color and composition rules.
 - `references/scene-recipes.md`: effect code against `engine.js`.
 - `references/pitfalls.md`: render, picture and motion failures with their fixes (numbers are shared across the family).
+- `references/studio.md`: what the studio's Tweak tab may change and how it writes the project files.

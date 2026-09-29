@@ -602,6 +602,8 @@ test("every op outside the allowlist, or with the wrong type or shape, is a 400 
     "a bad colour word": b("colors.accent", "red"), "a colour too short": b("colors.accent", "#12"), "a colour that is not hex": b("colors.accent", "#GGGGGG"),
     "a 7-digit colour": b("colors.accent", "#1234567"), "an 8-digit colour": b("colors.accent", "#ff005500"), "a colour with a space": b("colors.accent", "#ff0055 "), "a colour as a number": b("colors.accent", 255),
     "a whole colours object": b("colors", { bg: "#fff" }), "a role name with a dot": b("colors.a.b", "#fff"),
+    "a colour role that does not exist": b("colors.brandpink", "#ff0055"), "a colour role inherited from Object": b("colors.constructor", "#fff"),
+    "a new role inside a batch of legal ones": ["brand", [{ path: "colors.accent", value: "#ff0055" }, { path: "colors.brandpink", value: "#ff0055" }]],
     "copy of the wrong type": b("copy.caption", 5), "copy array of the wrong length": b("copy.features", ["a", "b"]), "copy array with a number in it": b("copy.features", ["a", "b", 3]),
     "copy string where an array is": b("copy.features", "a, b, c"), "a headline pair of the wrong shape": b("copy.headline", [["Fast"], ["from", 400], ["pure", 600], ["code.", 600]]),
     "a weight of 0": b("copy.headline", [["Fast", 0], ["from", 400], ["pure", 600], ["code.", 600]]), "a weight as a string": b("copy.headline", [["Fast", "400"], ["from", 400], ["pure", 600], ["code.", 600]]),
@@ -625,6 +627,33 @@ test("every op outside the allowlist, or with the wrong type or shape, is a 400 
   assert.equal((await tweak('{"file":"timeline","ops":[],"extra":1}')).status, 400);
   assert.equal((await tweak("[1]")).status, 400);
   assert.equal((await tweak("{nope")).status, 400);
+});
+
+test("a colour tweak edits a role that exists; a new role is refused and the file is left byte-identical", async () => {
+  const before = fs.readFileSync(brandFile());
+  const roles = Object.keys(JSON.parse(before).colors);
+  assert.ok(roles.includes("accent") && !roles.includes("brandpink"));
+  const refused = await tweak("brand", [{ path: "colors.brandpink", value: "#ff0055" }]);
+  assert.equal(refused.status, 400);
+  assert.match(JSON.parse(refused.body).error, /no such colour role/);
+  assert.ok(fs.readFileSync(brandFile()).equals(before));
+  try {
+    const ok = await tweak("brand", [{ path: "colors.accent", value: "#00aa44" }]);
+    assert.equal(ok.status, 200);
+    assert.equal(JSON.parse(fs.readFileSync(brandFile(), "utf8")).colors.accent, "#00aa44");
+    assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(brandFile(), "utf8")).colors), roles, "no role was added");
+  } finally {
+    fs.writeFileSync(brandFile(), before);
+    await sleep(700);
+  }
+  // a brand.json with no colors at all has no role to edit either, and is not created by the attempt
+  const dir = miniRoot();
+  await withStudio(dir, async (s) => {
+    const r = await request(s.port, { method: "POST", path: "/api/tweak", body: JSON.stringify({ file: "brand", ops: [{ path: "colors.accent", value: "#fff" }] }),
+      headers: { "content-type": "application/json", "x-studio-token": s.token, origin: `http://127.0.0.1:${s.port}` } });
+    assert.equal(r.status, 400);
+    assert.ok(!fs.existsSync(path.join(dir, "brand.json")));
+  });
 });
 
 test("the guard covers /api/tweak, and only POST is answered", async () => {

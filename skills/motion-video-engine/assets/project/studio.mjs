@@ -277,7 +277,8 @@ function sameShape(current, next, what) {
 // The fields the studio may change, and nothing else. Anything outside this list is refused, so a page (or a
 // script that stole the token) cannot rewrite a cue's name, the bpm, the duration, the fonts or the logo.
 //   timeline.json: cues[i].beat (a number that puts the cue inside the video), cues[i].hit (a boolean)
-//   brand.json:    colors.<role> (#rgb or #rrggbb), copy.<key> (same shape as now), wordmark, name
+//   brand.json:    colors.<role> and copy.<key> (a role or field that already exists; #rgb or #rrggbb, or the same
+//                  shape as now), wordmark, name
 // `doc` is the file as it is now; the result is a new document, or an error and nothing written. All or none.
 export function applyTweak(file, doc, ops) {
   need(isObj(doc), `${file}.json is not a JSON object`);
@@ -297,8 +298,8 @@ export function applyTweak(file, doc, ops) {
       }
       next.cues[Number(m[1])][m[2]] = value;
     } else if (file === "brand" && (m = COLOR_PATH.exec(p))) {
+      need(isObj(next.colors) && Object.hasOwn(next.colors, m[1]), `${p}: there is no such colour role to change`);
       need(typeof value === "string" && HEX.test(value), `${p} must be a #rgb or #rrggbb colour`);
-      if (!isObj(next.colors)) next.colors = {};
       next.colors[m[1]] = value;
     } else if (file === "brand" && (m = COPY_PATH.exec(p))) {
       need(isObj(next.copy) && Object.hasOwn(next.copy, m[1]), `${p}: there is no such copy field to change`);
