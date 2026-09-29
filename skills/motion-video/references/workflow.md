@@ -53,7 +53,7 @@ Extract tokens, fonts, logo and copy into `brand.json`, `fonts/`, `brand/logo.sv
 - `node render.mjs stills --times=1.2,1.9 --scale=0.5` for the moment you are working on (about 30 ms per still at half size).
 - `node render.mjs stills --beats` + `python3 sheet.py out/stills out/beats.png` for the whole piece.
 - `node render.mjs stills --strip=1.80:12 --out=out/strip` for consecutive frames around a transition.
-- `npm run studio` (Chrome or Chromium, `http://127.0.0.1:4321`): the composition live, scrubbable and playable with the score; every save reloads it, a syntax error or a failed load shows as a message over the last good frame, and `score.mjs` / `timeline.json` edits regenerate the sound. The person can click the frame there to leave a note (section 6).
+- `npm run studio` (Chrome or Chromium, `http://127.0.0.1:4321`): the composition live, scrubbable and playable with the score; every save reloads it, a syntax error (file, line and column, found by `node --check` within a fraction of a second) or a failed load shows as a message over the last good frame, and `score.mjs` / `timeline.json` edits regenerate the sound. The person can click the frame there to leave a note (section 6).
 - Read the PNGs (the Read tool shows images). Half-size sheets at 480 px per thumb are enough to judge composition; open full-size stills to judge type.
 
 ## 5. Score

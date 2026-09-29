@@ -63,6 +63,7 @@ test("the stream opens with hello, then the first audio-ready arrives and the WA
   assert.equal(served.headers["content-length"], String(bytes.length));
   assert.ok(served.body.equals(bytes));
   await sleep(600); // let filesystem events from the assembly and from out/ settle
+  assert.equal(events.count("syntax-error"), 0, "the start-up check finds nothing wrong with the demo project");
 });
 
 test("a page that connects after the audio is ready is told so at once", async () => {
@@ -212,6 +213,86 @@ test("editing score.mjs or timeline.json reloads and regenerates the audio", asy
     await sleep(500);
     assert.equal(events.count("reload", mark), 1, `${f}: the regenerated WAV lands in out/, which must not trigger another reload`);
   }
+});
+
+// ---- syntax errors ----
+const lineOf = (text, needle) => text.slice(0, text.indexOf(needle)).split("\n").length;
+// Runs fn with a project file replaced, then puts the original back and waits for the reload that follows.
+async function brokenFile(name, transform, fn) {
+  const file = path.join(root, name), original = fs.readFileSync(file, "utf8");
+  try {
+    fs.writeFileSync(file, transform(original));
+    await fn(original);
+  } finally {
+    const mark = events.mark();
+    fs.writeFileSync(file, original);
+    await events.wait("reload", { after: mark, timeout: 3000 });
+  }
+}
+
+test("a syntax error in engine.js is reported with its file, line and message at once, and holds the reload back until it is fixed", async () => {
+  const mark = events.mark();
+  const t0 = Date.now();
+  await brokenFile("engine.js", (s) => s.replace("export const lerp = (a, b, t) => a + (b - a) * t;", "export const lerp = (a, b, t) => a + (b - a) * ;"), async (original) => {
+    const err = await events.wait("syntax-error", { after: mark, timeout: 2000 });
+    console.log(`  engine.js syntax error reported after ${err.at - t0} ms: ${JSON.stringify(err.data)}`);
+    assert.ok(err.at - t0 < 2000);
+    assert.equal(err.data.file, "engine.js");
+    assert.equal(err.data.line, lineOf(original, "export const lerp = "), "the line in engine.js itself");
+    assert.equal(err.data.column, "export const lerp = (a, b, t) => a + (b - a) * ;".indexOf(";") + 1);
+    assert.match(err.data.message, /^SyntaxError: Unexpected token ';'/);
+    assert.equal(events.count("reload", mark), 0, "no reload while a file does not parse");
+    // while it is broken, saving something else says the same and still does not reload
+    const again = events.mark();
+    fs.writeFileSync(path.join(root, "brand.json"), fs.readFileSync(path.join(root, "brand.json")));
+    await events.wait("syntax-error", { after: again, timeout: 2000 });
+    assert.equal(events.count("reload", again), 0);
+    // a page that connects now is told at once
+    const late = connectSSE(port);
+    try { await late.ready; assert.equal((await late.wait("syntax-error", { timeout: 2000 })).data.file, "engine.js"); } finally { late.close(); }
+  });
+  const fixed = events.mark();
+  await sleep(500);
+  assert.equal(events.count("syntax-error", fixed), 0, "fixing it clears the error");
+});
+
+test("a syntax error in the inline module of index.html is found the same way", async () => {
+  const mark = events.mark();
+  await brokenFile("index.html", (s) => s.replace("await K.run(app, [Hud, Features, Lockup, Title], {", "await K.run(app, ;[Hud, Features, Lockup, Title], {"), async (original) => {
+    const err = await events.wait("syntax-error", { after: mark, timeout: 2000 });
+    assert.equal(err.data.file, "index.html");
+    assert.equal(err.data.line, lineOf(original, "await K.run(app, ["), "the line in index.html, not in the extracted script");
+    assert.equal(err.data.column, "await K.run(app, ;".indexOf(";") + 1);
+    assert.match(err.data.message, /^SyntaxError: Unexpected token ';'/);
+    assert.equal(events.count("reload", mark), 0);
+  });
+});
+
+test("a syntax error in a .mjs file (the score) is reported too", async () => {
+  const mark = events.mark();
+  await brokenFile("score.mjs", (s) => s.replace("const S = createSynth(tl);", "const S = createSynth(tl;"), async (original) => {
+    const err = await events.wait("syntax-error", { after: mark, timeout: 2000 });
+    assert.deepEqual([err.data.file, err.data.line], ["score.mjs", lineOf(original, "const S = createSynth(tl")]);
+  });
+  await events.wait("audio-ready", { after: events.mark() - 1, timeout: 15000 }).catch(() => {}); // the regenerated score settles before the next test
+  await sleep(600);
+});
+
+test("a project that is already broken when the studio starts tells the first page that connects", async () => {
+  const html = "<!doctype html>\n<p>x</p>\n<script type=\"application/json\">{ not: js }</script>\n<script src=\"gone.js\"></script>\n<script>\n  var fine = 1;\n  var b = ;\n</script>\n";
+  await withStudio(miniRoot({ "index.html": html }), async (s, sse) => {
+    const err = await sse.wait("syntax-error", { timeout: 5000 });
+    assert.deepEqual([err.data.file, err.data.line, err.data.column], ["index.html", 7, 11], "JSON and src scripts are skipped; a classic script is checked; the line is the HTML's");
+  });
+  const onOneLine = "<!doctype html>\n<script type=\"module\">let x = ;</script>\n";
+  await withStudio(miniRoot({ "index.html": onOneLine }), async (s, sse) => {
+    const err = await sse.wait("syntax-error", { timeout: 5000 });
+    assert.deepEqual([err.data.line, err.data.column], [2, "<script type=\"module\">let x = ;".indexOf(";") + 1], "the column counts the tag that precedes the code on its line");
+  });
+  await withStudio(miniRoot({ "index.html": "<!doctype html>\n<script type=\"module\">import a from \"./nope.js\"; await 1; export {};</script>\n" }), async (s, sse) => {
+    await sleep(1200);
+    assert.equal(sse.count("syntax-error"), 0, "a missing import and top-level await are not syntax errors");
+  });
 });
 
 test("updateJSON on a project file: one reload, no temp file, and the mutex sees the latest bytes", async () => {

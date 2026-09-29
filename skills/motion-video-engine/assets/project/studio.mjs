@@ -13,7 +13,11 @@
 //   audio-stale                   the audio is being regenerated (sent at start, and again on each edit)
 //   audio-ready {url, mtime}      out/studio-audio.wav is fresh (also sent to a page that connects later)
 //   audio-error {message}         score.mjs failed or is missing; the last good WAV, if any, stays served
+//   syntax-error {file, line, column, message}   a .html/.js/.mjs file does not parse (checked with `node --check` on
+//                                 every change; the reload is held back until every such file parses)
 //   feedback-changed              feedback.json changed (the studio's own write, the agent's, or a hand edit)
+// A syntax error is reported by the server at once rather than found by the page after a 5 s timeout: the browser
+// tells only the page's own window about a parse error, and it fires before the studio page can listen.
 // Audio comes from `node score.mjs --out=out/.studio-audio.wav.tmp`, renamed onto
 // out/studio-audio.wav when it succeeds (build.mjs writes and deletes a WAV of its own, so the
 // studio makes its own).
@@ -92,6 +96,73 @@ export function isIgnored(rel) {
   if (rel === "feedback.json") return true;                                        // written by the studio itself
   const name = parts[parts.length - 1];
   return /\.(tmp|swp)$/.test(name) || name.endsWith("~");                          // atomic-write and editor temp files
+}
+
+// ---------------------------------------------------------------- syntax checks ----
+
+// `node --check` reads the source on stdin, so nothing is written anywhere. Resolves to
+// { line, column, message } for a syntax error, or null when it parses (or cannot be checked).
+function nodeCheck(source, type) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["--check", `--input-type=${type}`, "-"], { stdio: ["pipe", "ignore", "pipe"] });
+    let err = "";
+    child.stderr.on("data", (d) => { if (err.length < 8000) err += d; });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 10000);
+    child.on("error", () => { clearTimeout(timer); resolve(null); });
+    child.on("close", (code) => { clearTimeout(timer); resolve(code === 0 ? null : parseNodeError(err)); });
+    child.stdin.on("error", () => {});
+    child.stdin.end(source);
+  });
+}
+// node prints "[stdin]:LINE", the source line, a caret line, then "SyntaxError: message".
+function parseNodeError(err) {
+  const lines = err.split("\n");
+  const at = lines.findIndex((l) => /^\[stdin\]:\d+$/.test(l));
+  const message = lines.find((l) => /^\w*Error: /.test(l));
+  if (at < 0 || !message) return null;
+  return { line: Number(lines[at].slice(8)), column: Math.max(0, (lines[at + 2] ?? "").indexOf("^")) + 1, message };
+}
+
+// The inline <script> blocks of an HTML file that hold code (not JSON, import maps or templates), each with
+// the position its code starts at, so a report can name the line and column in the HTML file itself.
+export function inlineScripts(html) {
+  const found = [];
+  for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)) {
+    if (/\bsrc\s*=/i.test(m[1])) continue;
+    const type = /\btype\s*=\s*["']?([^"'\s>]+)/i.exec(m[1])?.[1]?.toLowerCase();
+    if (type && !["module", "text/javascript", "application/javascript"].includes(type)) continue;
+    const start = m.index + "<script".length + m[1].length + 1, before = html.slice(0, start);
+    found.push({ code: m[2], module: type === "module", line: before.split("\n").length, column: start - (before.lastIndexOf("\n") + 1) });
+  }
+  return found;
+}
+
+// First syntax error in a project file, as { file, line, column, message }, or null. Only .html (its inline
+// scripts), .js and .mjs are looked at. Lines and columns are those of the file itself.
+async function checkFile(root, rel) {
+  const isHtml = /\.html?$/i.test(rel);
+  if (!isHtml && !/\.m?js$/.test(rel)) return null;
+  if (rel === "studio.html") return null; // the player itself, not the composition
+  let text;
+  try { text = await fs.promises.readFile(path.join(root, rel), "utf8"); } catch { return null; } // deleted meanwhile
+  const parts = isHtml ? inlineScripts(text) : [{ code: text, module: true, line: 1, column: 0 }];
+  for (const part of parts) {
+    const found = await nodeCheck("\n".repeat(part.line - 1) + " ".repeat(part.column) + part.code, part.module ? "module" : "commonjs");
+    if (found) return { file: rel, ...found };
+  }
+  return null;
+}
+
+// Every .html and .js file under the project (not the ignored places), for the check made at start-up.
+function browserFiles(root, dir = "") {
+  const out = [];
+  for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
+    const rel = dir ? `${dir}/${e.name}` : e.name;
+    if (isIgnored(rel)) continue;
+    if (e.isDirectory()) out.push(...browserFiles(root, rel));
+    else if (/\.(html?|js)$/i.test(e.name)) out.push(rel);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------- feedback notes ----
@@ -302,8 +373,29 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
 
   // ---- watcher: any source change reloads; score and timeline changes also regenerate the audio ----
   const changed = [];
-  let debounce = null;
-  let feedbackTimer = null;
+  const syntaxErrors = new Map(); // file -> its syntax error, for every checked file that currently has one
+  let debounce = null, feedbackTimer = null, flushChain = Promise.resolve();
+
+  // A change batch: recheck the code files in it, then either report the (first) syntax error and hold the
+  // reload back, or reload. Batches run one after another, so a later one never overtakes an earlier check.
+  async function flush(paths) {
+    if (closed) return;
+    for (const rel of paths) {
+      if (!/\.(html?|m?js)$/i.test(rel)) continue;
+      const found = await checkFile(realRoot, rel);
+      if (found) syntaxErrors.set(rel, found); else syntaxErrors.delete(rel);
+    }
+    if (closed) return;
+    if (syntaxErrors.size) {
+      const first = syntaxErrors.values().next().value;
+      log(`syntax error in ${first.file}:${first.line}:${first.column}: ${first.message}`);
+      broadcast("syntax-error", first);
+    } else {
+      log(`reload (${paths[0] || "unknown file"}${paths.length > 1 ? ` +${paths.length - 1}` : ""})`);
+      broadcast("reload", { path: paths[0] });
+    }
+    if (paths.some((p) => AUDIO_SOURCES.has(p))) requestAudio();
+  }
   const watcher = fs.watch(realRoot, { recursive: true }, (_event, filename) => {
     const rel = filename ? String(filename).split(path.sep).join("/") : "";
     if (rel === "feedback.json") { // never a reload (the studio writes it itself), but an open notes panel must hear of it
@@ -315,10 +407,8 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
     changed.push(rel);
     clearTimeout(debounce);
     debounce = setTimeout(() => {
-      const paths = changed.splice(0);
-      log(`reload (${paths[0] || "unknown file"}${paths.length > 1 ? ` +${paths.length - 1}` : ""})`);
-      broadcast("reload", { path: paths[0] });
-      if (paths.some((p) => AUDIO_SOURCES.has(p))) requestAudio();
+      const paths = [...new Set(changed.splice(0))];
+      flushChain = flushChain.then(() => flush(paths)).catch((e) => log(`could not handle a change: ${e.message}`));
     }, DEBOUNCE_MS);
   });
   watcher.on("error", (e) => log(`watcher error: ${e.message}`));
@@ -346,6 +436,7 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
       res.write("retry: 1000\n\n");
       sse(res, "hello", { run });
       sse(res, ...snapshot());
+      if (syntaxErrors.size) sse(res, "syntax-error", syntaxErrors.values().next().value);
       clients.add(res);
       req.on("close", () => clients.delete(res));
       return;
@@ -422,6 +513,14 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
   listening = server.address().port;
   const url = `http://127.0.0.1:${listening}/`;
   requestAudio(); // the first WAV, so the page has sound as soon as it opens
+  // A project that is already broken when the studio starts: find out now, so a page that opens onto it is told at once.
+  (async () => {
+    for (const rel of browserFiles(realRoot)) {
+      const found = await checkFile(realRoot, rel);
+      if (found && !closed) syntaxErrors.set(rel, found);
+    }
+    if (syntaxErrors.size && !closed) broadcast("syntax-error", syntaxErrors.values().next().value);
+  })().catch((e) => log(`start-up syntax check failed: ${e.message}`));
 
   async function close() {
     if (closed) return;

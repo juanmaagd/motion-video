@@ -448,23 +448,24 @@ it("saving index.html swaps in the new composition, keeps t, and keeps playing",
   await page.context().close();
 });
 
-it("a project that fails to load shows an overlay instead of a blank frame, keeps the last good frame, and recovers on the next save", async () => {
+it("a composition that never becomes ready shows the timeout overlay instead of a blank frame, keeps the last good frame, and recovers on the next save", async () => {
   const page = await open("?readyTimeout=1500&t=2");
-  const breakIndex = (s) => s.replace("await K.run(", "await K.run((((");
-  await withFile("index.html", breakIndex, async () => {
+  // no syntax error and no exception: nothing for the server or the error listener to report, only the 5 s (here 1.5 s) fallback
+  const hang = (s) => s.replace("await K.run(", "await new Promise(() => {}); await K.run(");
+  await withFile("index.html", hang, async () => {
     await waitOverlay(page, false);
     const o = await overlay(page);
-    console.log(`  syntax error in index.html -> overlay: "${o.title}"`);
-    assert.ok(o.title.length > 0 && o.body.length > 0);
+    assert.match(o.title, /did not become ready/);
+    assert.ok(o.body.length > 0);
     assert.equal(await page.evaluate(() => document.getElementById("comp") !== null && __studio.ready), true, "the last good frame is still there under the overlay");
   });
   await waitOverlay(page, true);
   assert.equal((await studioState(page)).ready, true);
   assert.equal((await studioState(page)).rendered, 2);
 
-  // and a page opened onto a broken project has no frame at all, only the message, until the file is fixed
+  // and a page opened onto such a project has no frame at all, only the message, until the file is fixed
   let cold;
-  await withFile("index.html", breakIndex, async () => {
+  await withFile("index.html", hang, async () => {
     cold = await open("?readyTimeout=1500", { waitReady: false });
     await waitOverlay(cold, false);
     assert.equal(await cold.evaluate(() => __studio.ready), false);
@@ -472,6 +473,31 @@ it("a project that fails to load shows an overlay instead of a blank frame, keep
   await waitOverlay(cold, true);
   await cold.waitForFunction(() => __studio.ready === true, null, { timeout: 8000 });
   await cold.context().close();
+  await page.context().close();
+});
+
+it("a syntax error shows its real message and line within two seconds, over the last good frame, and fixing it clears the overlay", async () => {
+  const cases = [
+    ["engine.js", (s) => s.replace("export const lerp = (a, b, t) => a + (b - a) * t;", "export const lerp = (a, b, t) => a + (b - a) * ;"), "export const lerp = "],
+    ["index.html", (s) => s.replace("await K.run(app, [Hud, Features, Lockup, Title], {", "await K.run(app, ;[Hud, Features, Lockup, Title], {"), "await K.run(app, ["],
+  ];
+  const page = await open("?t=2"); // the default 5 s timeout: anything faster than that came from the server's check
+  for (const [name, transform, needle] of cases) {
+    const original = fs.readFileSync(path.join(root, name), "utf8");
+    const line = original.slice(0, original.indexOf(needle)).split("\n").length;
+    await withFile(name, transform, async () => {
+      const t0 = Date.now();
+      await waitOverlay(page, false, 2000);
+      const o = await overlay(page);
+      console.log(`  ${name}: overlay after ${Date.now() - t0} ms: "${o.title}" / "${o.body}"`);
+      assert.match(o.title, new RegExp(`^Syntax error in ${name.replace(".", "\\.")}:${line}:\\d+$`));
+      assert.match(o.body, /^SyntaxError: Unexpected token ';'/);
+      assert.equal(await page.evaluate(() => __studio.ready), true, "the last good frame is still on screen");
+    });
+    await waitOverlay(page, true, 3000);
+    await page.waitForFunction(() => __studio.ready && __studio.error === null);
+    assert.equal((await studioState(page)).rendered, 2);
+  }
   await page.context().close();
 });
 

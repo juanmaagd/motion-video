@@ -191,7 +191,8 @@ function hideError() { S.error = null; $("overlay").hidden = true; }
 // new window exists: a polling loop attaches the listeners as soon as the window changes (10 ms), then
 // keeps them for runtime errors. That catches an exception thrown while the composition initialises
 // (a rejected fetch, a throwing scene init). A SYNTAX error is raised at parse time, before any poll can
-// attach, and the browser tells only the page itself, so that case ends at READY_TIMEOUT_MS instead.
+// attach, and the browser tells only the page itself: the SERVER reports those (syntax-error event). This
+// timeout is the fallback for a composition that never becomes ready for any other reason.
 let loadSeq = 0;
 function loadComp(t) {
   const seq = ++loadSeq;
@@ -217,7 +218,7 @@ function loadComp(t) {
       if (w && !seen.has(w)) { seen.add(w); w.addEventListener("error", onError); w.addEventListener("unhandledrejection", onRejection); }
       let failure = fatal;
       if (!failure && performance.now() - started > READY_TIMEOUT_MS) {
-        failure = { title: "index.html did not become ready", detail: `Nothing was ready after ${READY_TIMEOUT_MS / 1000} s. The usual cause is a syntax error in index.html or engine.js (the browser does not report those to this page); others are a missing file or a rejected fetch. The browser console has the exact error, and \`npm run stills\` prints it too.` };
+        failure = { title: "index.html did not become ready", detail: `Nothing was ready after ${READY_TIMEOUT_MS / 1000} s. Something in index.html never finished (an await that does not resolve, a request that hangs) or failed in a way the page cannot see. The browser console has the details, and \`npm run stills\` prints them too.` };
       }
       if (isReady(w)) {
         clearInterval(timer);
@@ -620,6 +621,9 @@ function connectEvents() {
   on("reload", () => reload());
   on("audio-stale", () => setAudioPill("regenerating"));
   on("audio-ready", ({ url }) => loadAudio(url));
+  // The server parsed every code file and one does not: say so at once, over the last good frame. The next
+  // reload event (sent when every file parses again) loads the composition and clears this.
+  on("syntax-error", ({ file, line, column, message }) => showError(`Syntax error in ${file}:${line}:${column}`, message));
   on("feedback-changed", () => refreshNotes());
   on("audio-error", ({ message }) => setAudioPill(S.audioBuffer ? `${message} (still playing the last good version)` : `no sound: ${message}`, "bad"));
 }
