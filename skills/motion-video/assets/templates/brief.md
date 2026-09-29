@@ -33,7 +33,7 @@ real number), say what stands in for it and why.
 | 2 | | | |
 
 Budget: ~2 words/beat for display type; a full sentence needs a whole bar; every line must read at
-1x speed (references/storyboard.md, references/motion-craft.md).
+1x speed (references/storyboard.md; `motion-craft.md` in the `motion-video-engine` skill).
 
 ## Copy / evidence table
 
@@ -61,7 +61,7 @@ moved repo is exactly the kind of error that survives every visual review pass.
 
 If a registry is stale, prefer the repo URL on screen and say so here.
 
-## Brand bans (from references/brand-extraction.md)
+## Brand bans (from `brand-extraction.md` in the `motion-video-brand` skill)
 
 List anything this brand forbids (motifs, colors used decoratively, tone, fabricated metrics) so a
 storyboard idea can be checked against it before it is built.
@@ -76,7 +76,7 @@ licence page).
 
 Most videos need none. Only list a row when a scene genuinely needs a raster plate, texture,
 illustrative cut-out, or styleframe (never a mark, type, UI, screenshot, or a claim -- see
-references/generated-assets.md) -- and get it approved here before generating, same as new copy.
+`generated-assets.md` in the `motion-video-brand` skill) -- and get it approved here before generating, same as new copy.
 
 | Scene | Purpose | Prompt | Size | Transparent |
 |---|---|---|---|---|

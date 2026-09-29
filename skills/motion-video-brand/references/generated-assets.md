@@ -93,6 +93,6 @@ change rather than looping indefinitely on a prompt that will not converge.
 
 ## Recording the brief
 
-Log what was generated, and why, in `assets/templates/brief.md`'s "Generated assets" section
-(scene, purpose, prompt, size, transparent) before wiring an asset into a scene -- the same
+Log what was generated, and why, in the "Generated assets" section of `assets/templates/brief.md`
+(in the `motion-video` skill) (scene, purpose, prompt, size, transparent) before wiring an asset into a scene -- the same
 approval-before-building discipline as the script table.

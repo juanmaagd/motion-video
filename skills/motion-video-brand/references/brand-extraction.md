@@ -31,7 +31,7 @@ Worked example (Acme, fictional): ink `#12141a`, canvas `#fdfdfc`, hairlines `#e
 
 ## Logo geometry
 
-Use the shipped SVG paths as-is (inline them; animate with transforms). Verify the final lockup against the original: render the lockup frame with any push/zoom disabled, render the brand SVG at the same box, compare pixels — expect 0 pixels differing by more than 50% (the showreel measured mean abs diff 0.0009). Automated: expose `window.__logoBox(t)` (returns `{x, y, w, h}` in full-resolution px, or `null` when the logo is not shown) from the composition and `build.mjs` runs this check for you every final build via `brandqa.mjs`/`logoqa.py` — see `qa-checklist.md`.
+Use the shipped SVG paths as-is (inline them; animate with transforms). Verify the final lockup against the original: render the lockup frame with any push/zoom disabled, render the brand SVG at the same box, compare pixels — expect 0 pixels differing by more than 50% (the showreel measured mean abs diff 0.0009). Automated: expose `window.__logoBox(t)` (returns `{x, y, w, h}` in full-resolution px, or `null` when the logo is not shown) from the composition and `build.mjs` runs this check for you every final build via `brandqa.mjs`/`logoqa.py` — see `qa-checklist.md` in the `motion-video-qa` skill.
 
 ## Third-party marks
 
@@ -57,7 +57,7 @@ mechanism: `references/device-frames.md`; pitfall 62.
 
 ## Claims and evidence
 
-- Separate **tested** (you personally verified it, this session) from **supported** (documented elsewhere, not independently verified) for every on-screen number or claim. Track both in `assets/templates/brief.md`'s claims table.
+- Separate **tested** (you personally verified it, this session) from **supported** (documented elsewhere, not independently verified) for every on-screen number or claim. Track both in the claims table of `assets/templates/brief.md` (in the `motion-video` skill).
 - Broader claims than what is tested are the user's decision, not a default — ask rather than round up.
 - An on-screen number must match the specific public source a viewer would actually go check, even when a broader source exists (e.g. the docs say "50+ integrations" while a separate catalog lists 140 — show "50+", the number the viewer's own source confirms).
 - Keep claim values as data in `timeline.json`/`brand.json` (`copy`, a dedicated `claims` block) rather than hard-coded inside a scene, so correcting one is a one-line edit and a re-render, not a scene rewrite.

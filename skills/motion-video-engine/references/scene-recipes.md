@@ -250,8 +250,8 @@ Canvas rows of monospace records in 3 parallax layers (12/15/19 px, alpha 0.10/0
 ## Generated plate grading
 
 A raster plate from `gen-image.mjs` is never trusted for exact colour. Grade it to the brand's
-tokens with a deterministic SVG filter, built once at init (see `references/generated-assets.md`
-for when to generate one at all -- most videos need none):
+tokens with a deterministic SVG filter, built once at init (see `generated-assets.md` in the
+`motion-video-brand` skill for when to generate one at all -- most videos need none):
 
 ```js
 const duo = K.duotoneFilter(defs, "plateDuo", col.ink, col.bg);      // two-tone
@@ -291,7 +291,8 @@ this.field.render(t, C.type1);                            // characters appear i
 const scrollY = lerp(0, -maxScroll, E.inOutCubic(prog(t, C.scroll1, 0.6)));
 this.list.style.transform = `translateY(${scrollY}px)`;   // clipped container: this IS the scroll
 ```
-Land every click/type/scroll exactly on a beat (`storyboard.md`'s Product demo template); hold the
+Land every click/type/scroll exactly on a beat (the Product demo template in `storyboard.md`, in the
+`motion-video` director skill); hold the
 result state >= 0.3 s before the lockup so the payoff actually reads.
 
 ## Deterministic WebGL/GLSL generative background
@@ -347,7 +348,7 @@ right or outside-in) -- an arbitrary DOM order looks like scribbling, not drawin
 
 ## Device frame (product demo)
 
-Full rules and the layered SVG contract: `references/device-frames.md`. Short version -- an
+Full rules and the layered SVG contract: `device-frames.md` in the `motion-video-brand` skill. Short version -- an
 animated shot uses the generic frame, a static official-looking shot uses a licensed one:
 
 ```js

@@ -60,7 +60,7 @@ components (status bar, keyboard, notification banner, home indicator, ...) as s
 Same rule, same library: the user keeps their own exports in `$MOTION_VIDEO_ASSETS/apple/` (default `~/.motion-video-assets/apple/`)
 and drops the ones a project needs into `brand/devices/` (or directly into the project) before the
 build; this skill never bundles or fetches them. Use them as ordinary static `<img>` layers stacked
-into a product-demo UI mock (`references/scene-recipes.md`'s "Product demo" recipe) — e.g. an
+into a product-demo UI mock (the "Product demo" recipe in `scene-recipes.md`, in the `motion-video-engine` skill) — e.g. an
 official status-bar PNG pinned to the top of the mock's screen area, above the app content and
 below any device-frame overlay. Scope is the same as the bezel licence: 2A, mock-ups for software
 that runs only on an Apple OS; never bundle or redistribute the exported PNGs themselves.
@@ -105,8 +105,8 @@ python3 detect-frame.py brand/devices/iphone-official.png \
 
 FAILs loudly (exit 1) on a PNG with no enclosed transparent region — a flattened marketing shot or
 a solid product photo has nothing to detect, and a sidecar with a zero/missing rect would silently
-break every screen-content placement downstream (references/pitfalls.md #61: a verifier that
-checked nothing must FAIL).
+break every screen-content placement downstream (pitfall 61, in the `pitfalls.md` of the
+`motion-video-qa` skill: a verifier that checked nothing must FAIL).
 
 ```js
 const frame = await K.loadDeviceFrame("brand/devices/iphone-official.png.json");
@@ -132,4 +132,4 @@ const shot = K.officialDeviceShot(cam, frame, screenContentEl);
 
 Every reference in this file resolves to either a public URL (developer.apple.com) or a path on the
 user's own machine (`$MOTION_VIDEO_ASSETS/...`, default `~/.motion-video-assets/`, or the project's `brand/devices/`) — never
-another skill.
+a skill outside the motion-video family (the `motion-video-*` siblings named in this file).
