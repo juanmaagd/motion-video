@@ -449,6 +449,7 @@ window.__studio = {
   get error() { return S.error; },
   get audioSeconds() { return S.audioBuffer ? S.audioBuffer.duration : null; },
   get audioClock() { return !!(S.playing && S.clock?.audio); },
+  get audioState() { return S.ctx ? S.ctx.state : null; },
   seek, play, pause,
 };
 boot();

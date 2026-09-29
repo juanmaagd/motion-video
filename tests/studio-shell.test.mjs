@@ -38,7 +38,7 @@ async function open(query = "", { context, route, waitReady = true } = {}) {
   return page;
 }
 const readout = (page) => page.evaluate(() => Object.fromEntries(["rt", "rf", "rb", "rc", "rn", "rs"].map((id) => [id, document.getElementById(id).textContent])));
-const studioState = (page) => page.evaluate(() => ({ t: __studio.t, rendered: __studio.rendered, playing: __studio.playing, loads: __studio.loads, ready: __studio.ready, audioClock: __studio.audioClock }));
+const studioState = (page) => page.evaluate(() => ({ t: __studio.t, rendered: __studio.rendered, playing: __studio.playing, loads: __studio.loads, ready: __studio.ready, audioClock: __studio.audioClock, audioState: __studio.audioState }));
 const audioReady = (page) => page.waitForFunction(() => window.__studio.audioSeconds !== null, null, { timeout: 15000 });
 const overlay = (page) => page.evaluate(() => ({ hidden: document.getElementById("overlay").hidden, title: document.getElementById("errTitle").textContent, body: document.getElementById("errBody").textContent }));
 const waitOverlay = (page, hidden, timeout = 8000) => page.waitForFunction((h) => document.getElementById("overlay").hidden === h, hidden, { timeout });
@@ -198,7 +198,7 @@ it("arrows step one frame, Shift+arrows one beat, Space plays and pauses, L togg
   await page.context().close();
 });
 
-it("Space plays from where it is, time advances with the audio clock, and pause freezes on a whole frame", async () => {
+it("Space plays from where it is; the Web Audio clock drives time exactly when the AudioContext runs, the wall clock otherwise", async () => {
   const page = await open("?t=2");
   await audioReady(page);
   assert.equal(await page.evaluate(() => Math.round(__studio.audioSeconds * 10) / 10), 7.5, "the regenerated WAV decodes to the video's length");
@@ -207,7 +207,10 @@ it("Space plays from where it is, time advances with the audio clock, and pause 
   const running = await studioState(page);
   assert.equal(running.playing, true);
   assert.ok(running.t > 2.5 && running.t < 3.6, `t=${running.t} after about a second from 2.0`);
-  assert.equal(running.audioClock, true, "the Web Audio clock is what drives the time when the soundtrack is loaded");
+  // A machine with no audio output may never get a running AudioContext. That is not a failure of the
+  // studio: it must then fall back to the wall clock. Where the context does run, the audio clock must be in charge.
+  console.log(`  AudioContext state: ${running.audioState}; clock: ${running.audioClock ? "Web Audio" : "wall"}`);
+  assert.equal(running.audioClock, running.audioState === "running", `AudioContext is ${running.audioState} but audioClock is ${running.audioClock}`);
   await page.keyboard.press("Space");
   const paused = await studioState(page);
   assert.equal(paused.playing, false);
@@ -215,6 +218,25 @@ it("Space plays from where it is, time advances with the audio clock, and pause 
   assert.equal(paused.rendered, paused.t, "and that frame is what is painted");
   await sleep(300);
   assert.equal((await studioState(page)).t, paused.t, "paused stays put");
+  await page.context().close();
+});
+
+it("on a machine whose AudioContext never runs (no audio output) it plays on the wall clock", async () => {
+  const page = await open("?t=1", {
+    route: (p) => p.addInitScript(() => {
+      const Real = window.AudioContext;
+      window.AudioContext = class extends Real { get state() { return "suspended"; } resume() { return Promise.resolve(); } };
+    }),
+  });
+  await audioReady(page);
+  await page.keyboard.press("Space");
+  await sleep(900);
+  const st = await studioState(page);
+  assert.equal(st.audioState, "suspended");
+  assert.equal(st.audioClock, false);
+  assert.equal(st.playing, true);
+  assert.ok(st.t > 1.5 && st.t < 2.3, `t=${st.t}: time still advances`);
+  await page.keyboard.press("Space");
   await page.context().close();
 });
 

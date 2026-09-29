@@ -8,6 +8,7 @@ This file is for agents working ON the skills (maintaining them), not for agents
 
 ```
 CLAUDE.md, README.md, LICENSE, .gitignore   # repo-only: never shipped to installers
+package.json                                 # repo-only: `npm test` and the playwright-core dev dependency the browser tests use (its node_modules and lockfile are git-ignored)
 .claude-plugin/marketplace.json              # repo-only: groups the five skills as one plugin; its `skills` list must match the folders below
 tests/                                       # repo-only: `node --test` suites; each assembles a project in a temp dir. Test-only code never goes inside skills/
 skills/                                      # THE install surface: each folder is copied verbatim by `npx skills add`
@@ -95,7 +96,7 @@ DISABLE_TELEMETRY=1 npx -y skills add <path-to-this-repo> --agent claude-code --
 #    It must detect exactly FIVE skills (with the marketplace manifest present), and for each installed skill the file list must equal `git ls-files skills/<name>`.
 
 # 5. Nothing private or stray
-rg -n -i "/Users/|/home/|@gmail|confirmed by the user" skills README.md   # expect 0 hits
+rg -n -i "/Users/|/home/|@gmail|confirmed by the user" skills tests README.md package.json   # expect 0 hits
 fd -H -u "node_modules|__pycache__|\.DS_Store" skills                  # expect nothing
 
 # 6. A behaviour-preserving change must leave the assembled project byte-identical to the last release's.
@@ -104,10 +105,10 @@ fd -H -u "node_modules|__pycache__|\.DS_Store" skills                  # expect 
 #    extracted to $OLD, then `diff -rq "$OLD/skills/motion-video/assets/template" "$TMP/t"` must print nothing,
 #    and the executable-bit lists (`fd -t x`, paths made relative, sorted) must be equal.
 
-# 7. Tests: they assemble a project in a temp dir. Node 22 needs the glob (a bare `tests/` directory is loaded as a module and fails).
-#    The browser tests need playwright-core (MOTION_VIDEO_TEST_DEPS=<folder whose node_modules has it>, or `npm i playwright-core` at the repo root)
-#    and a Chromium headless shell. Without them they are skipped with a message: report that as partial, never as a pass.
-node --test "tests/*.test.mjs"
+# 7. Tests: they assemble a project in a temp dir. `npm install` at the repo root fetches playwright-core (its node_modules stays untracked),
+#    and the browser tests also need a Chromium headless shell. Without either they are skipped with a message: report that as partial, never as a pass.
+#    MOTION_VIDEO_TEST_DEPS=<folder whose node_modules has playwright-core> overrides the root install.
+npm install && npm test
 ```
 
 When a change touches rendering, audio or QA, also build the demo in the assembled project (from step 3): run `npm run build` (QA must pass) and `npm run determinism`.

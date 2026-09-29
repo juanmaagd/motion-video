@@ -1,0 +1,11 @@
+{
+  "name": "motion-video-repo",
+  "private": true,
+  "description": "Repo-only: the dev dependency and the test script used to maintain the skills. Never shipped; skills/ is the install surface.",
+  "scripts": {
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

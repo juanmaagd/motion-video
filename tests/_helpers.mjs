@@ -4,9 +4,9 @@
 // the way the director's workflow.md section 1 does, and exercise that copy.
 //
 // Playwright tests need `playwright-core` and a Chromium headless shell. Point
-// MOTION_VIDEO_TEST_DEPS at a folder whose node_modules holds playwright-core (or run
-// `npm i playwright-core` at the repo root; node_modules is git-ignored). Without either, those
-// tests are skipped with a message, never silently passed.
+// MOTION_VIDEO_TEST_DEPS at a folder whose node_modules holds playwright-core, or run `npm install`
+// at the repo root (node_modules and the lockfile are git-ignored). Without either, those tests are
+// skipped with a message, never silently passed.
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -99,7 +99,7 @@ export function findChrome() {
 
 // Why browser tests cannot run here, or null when they can.
 export function browserUnavailable() {
-  if (!loadPlaywright()) return "playwright-core not found (set MOTION_VIDEO_TEST_DEPS or run `npm i playwright-core` at the repo root)";
+  if (!loadPlaywright()) return "playwright-core not found (run `npm install` at the repo root, or set MOTION_VIDEO_TEST_DEPS)";
   if (!findChrome()) return "no Chromium headless shell found (npx playwright install chromium-headless-shell, or set CHROME_PATH)";
   return null;
 }
