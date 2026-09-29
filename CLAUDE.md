@@ -9,6 +9,7 @@ This file is for agents working ON the skills (maintaining them), not for agents
 ```
 CLAUDE.md, README.md, LICENSE, .gitignore   # repo-only: never shipped to installers
 .claude-plugin/marketplace.json              # repo-only: groups the five skills as one plugin; its `skills` list must match the folders below
+tests/                                       # repo-only: `node --test` suites; each assembles a project in a temp dir. Test-only code never goes inside skills/
 skills/                                      # THE install surface: each folder is copied verbatim by `npx skills add`
 ├── motion-video/                            # director: intake, storyboard, assembly, review loop, delivery
 │   ├── SKILL.md, LICENSE                    # every skill folder has these two; LICENSE is an identical copy of the root one
@@ -19,7 +20,7 @@ skills/                                      # THE install surface: each folder 
 ├── motion-video-engine/                     # scenes and render pipeline
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # motion-craft, scene-recipes, pitfalls
-│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, timeline.json
+│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, serve.mjs, timeline.json
 ├── motion-video-sound/                      # the synthesized score
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # sound-design, pitfalls
@@ -102,6 +103,11 @@ fd -H -u "node_modules|__pycache__|\.DS_Store" skills                  # expect 
 #    `git archive 25aa089 -- skills/motion-video/assets/template`
 #    extracted to $OLD, then `diff -rq "$OLD/skills/motion-video/assets/template" "$TMP/t"` must print nothing,
 #    and the executable-bit lists (`fd -t x`, paths made relative, sorted) must be equal.
+
+# 7. Tests: they assemble a project in a temp dir. Node 22 needs the glob (a bare `tests/` directory is loaded as a module and fails).
+#    The browser tests need playwright-core (MOTION_VIDEO_TEST_DEPS=<folder whose node_modules has it>, or `npm i playwright-core` at the repo root)
+#    and a Chromium headless shell. Without them they are skipped with a message: report that as partial, never as a pass.
+node --test "tests/*.test.mjs"
 ```
 
 When a change touches rendering, audio or QA, also build the demo in the assembled project (from step 3): run `npm run build` (QA must pass) and `npm run determinism`.

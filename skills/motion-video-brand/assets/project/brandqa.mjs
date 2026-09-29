@@ -54,10 +54,21 @@ function findChrome() {
   throw new Error("No Chromium headless shell found. Run `npx playwright install chromium-headless-shell` or set CHROME_PATH.");
 }
 
+// Requests are contained to the project folder by REAL path: path.relative, never a string prefix
+// (a sibling folder "<root>-secret" starts with "<root>"), and a symlink cannot lead out of it.
+// Kept inline so this skill's file does not depend on another skill's (engine serve.mjs does the same).
+const REAL_ROOT = fs.realpathSync(ROOT);
+const inside = (p) => { const rel = path.relative(REAL_ROOT, p); return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel)); };
+function fileFor(urlPath) {
+  try {
+    const p = fs.realpathSync(path.join(ROOT, decodeURIComponent(urlPath)));
+    return inside(p) && fs.statSync(p).isFile() ? p : null;
+  } catch { return null; }
+}
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
 const server = http.createServer((req, res) => {
-  const p = path.join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
-  if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
+  const p = fileFor(new URL(req.url, "http://x").pathname);
+  if (!p) { res.writeHead(404); res.end(); return; }
   res.writeHead(200, { "content-type": TYPES[path.extname(p)] || "application/octet-stream" });
   fs.createReadStream(p).pipe(res);
 });

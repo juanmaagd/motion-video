@@ -7,11 +7,11 @@
 //
 //   node determinism.mjs [--times=0.5,2.1,4.8] [--scale=0.5]
 import { chromium } from "playwright-core";
-import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createStaticHandler, listen } from "./serve.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const TL = JSON.parse(fs.readFileSync(path.join(ROOT, "timeline.json"), "utf8"));
@@ -44,14 +44,7 @@ function findChrome() {
   throw new Error("No Chromium headless shell found. Run `npx playwright install chromium-headless-shell` or set CHROME_PATH.");
 }
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".woff2": "font/woff2", ".svg": "image/svg+xml" };
-const server = http.createServer((req, res) => {
-  const p = path.join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
-  if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
-  res.writeHead(200, { "content-type": TYPES[path.extname(p)] || "application/octet-stream" });
-  fs.createReadStream(p).pipe(res);
-});
-await new Promise((r) => server.listen(0, "127.0.0.1", r));
+const server = await listen(createStaticHandler(ROOT));
 const url = `http://127.0.0.1:${server.address().port}/index.html`;
 
 const browser = await chromium.launch({ executablePath: findChrome(), args: ["--font-render-hinting=none", "--hide-scrollbars", "--force-color-profile=srgb"] });

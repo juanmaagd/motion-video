@@ -5,7 +5,7 @@ compatibility: "Node.js 22+ (logos.mjs, brandqa.mjs, gen-image.mjs); Python 3 wi
 license: Apache-2.0
 metadata:
   author: "juanmaagd"
-  version: "2.0"
+  version: "2.0.1"
 ---
 
 # Motion Video Brand

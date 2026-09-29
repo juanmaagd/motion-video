@@ -44,6 +44,7 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 | `cta-check.sh` | no | verify an npm dist-tag, a URL, or a GitHub repo before it appears on screen. |
 | `archive.sh` | no | snapshot outputs + source (sans `node_modules`) into `vN/` before a revision. |
 | `determinism.mjs` | no | forward vs reversed frame-order capture must be pixel-identical. |
+| `serve.mjs` | no | the static file server behind `render.mjs` and `determinism.mjs`: GET/HEAD only, contained to this folder by real path (no `..`, no symlink out), no dotfiles or `node_modules`. |
 | `gen-image.mjs` | no | optional: one raster plate/texture via the Codex CLI's own built-in image tool, no fallback; records `generated/manifest.json`. |
 | `generated/` | maybe | `manifest.json` (empty by default) + any files `gen-image.mjs` writes. |
 
