@@ -8,7 +8,9 @@ This file is for agents working ON the skills (maintaining them), not for agents
 
 ```
 CLAUDE.md, README.md, LICENSE, .gitignore   # repo-only: never shipped to installers
+package.json                                 # repo-only: `npm test` and the playwright-core dev dependency the browser tests use (its node_modules and lockfile are git-ignored)
 .claude-plugin/marketplace.json              # repo-only: groups the five skills as one plugin; its `skills` list must match the folders below
+tests/                                       # repo-only: `node --test` suites; each assembles a project in a temp dir. Test-only code never goes inside skills/
 skills/                                      # THE install surface: each folder is copied verbatim by `npx skills add`
 ├── motion-video/                            # director: intake, storyboard, assembly, review loop, delivery
 │   ├── SKILL.md, LICENSE                    # every skill folder has these two; LICENSE is an identical copy of the root one
@@ -19,7 +21,7 @@ skills/                                      # THE install surface: each folder 
 ├── motion-video-engine/                     # scenes and render pipeline
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # motion-craft, scene-recipes, pitfalls
-│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, timeline.json
+│   └── assets/project/                      # index.html, engine.js, render.mjs, build.mjs, determinism.mjs, serve.mjs, studio.mjs, studio.html, timeline.json
 ├── motion-video-sound/                      # the synthesized score
 │   ├── SKILL.md, LICENSE
 │   ├── references/                          # sound-design, pitfalls
@@ -94,7 +96,7 @@ DISABLE_TELEMETRY=1 npx -y skills add <path-to-this-repo> --agent claude-code --
 #    It must detect exactly FIVE skills (with the marketplace manifest present), and for each installed skill the file list must equal `git ls-files skills/<name>`.
 
 # 5. Nothing private or stray
-rg -n -i "/Users/|/home/|@gmail|confirmed by the user" skills README.md   # expect 0 hits
+rg -n -i "/Users/|/home/|@gmail|confirmed by the user" skills tests README.md package.json   # expect 0 hits
 fd -H -u "node_modules|__pycache__|\.DS_Store" skills                  # expect nothing
 
 # 6. A behaviour-preserving change must leave the assembled project byte-identical to the last release's.
@@ -102,6 +104,11 @@ fd -H -u "node_modules|__pycache__|\.DS_Store" skills                  # expect 
 #    `git archive 25aa089 -- skills/motion-video/assets/template`
 #    extracted to $OLD, then `diff -rq "$OLD/skills/motion-video/assets/template" "$TMP/t"` must print nothing,
 #    and the executable-bit lists (`fd -t x`, paths made relative, sorted) must be equal.
+
+# 7. Tests: they assemble a project in a temp dir. `npm install` at the repo root fetches playwright-core (its node_modules stays untracked),
+#    and the browser tests also need a Chromium headless shell. Without either they are skipped with a message: report that as partial, never as a pass.
+#    MOTION_VIDEO_TEST_DEPS=<folder whose node_modules has playwright-core> overrides the root install.
+npm install && npm test
 ```
 
 When a change touches rendering, audio or QA, also build the demo in the assembled project (from step 3): run `npm run build` (QA must pass) and `npm run determinism`.
@@ -119,6 +126,7 @@ When a change touches rendering, audio or QA, also build the demo in the assembl
 - Official-bezel detection (`detect-frame.py`) on a real Apple export. It has only been tested on synthetic PNGs.
 - The user-library lookup (`$MOTION_VIDEO_ASSETS/devices/`, `.../apple/`) on a real library.
 - A live `gen-image.mjs` run, which spends Codex quota.
+- The studio (`npm run studio`) in Safari and Firefox: only headless Chromium is tested. Audio latency on Bluetooth outputs is also unmeasured; the page's latency offset slider is a manual compensation.
 - Agents other than Claude Code. The intake has a plain-text fallback for runtimes without a question UI, but nobody has exercised it.
 - `motion-video-qa` on an arbitrary MP4: only `lagproof.py` and `inspect.sh` are standalone today; `qa.py` reads the project's `timeline.json` and `brand.json`.
 

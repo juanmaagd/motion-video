@@ -101,6 +101,8 @@ export function createStage(tl, brand) {
 }
 
 // Mounts scenes ({ init(app), render(t) }) in order and defines window.renderAt(t).
+// A scene may also carry a `name` (shown by the studio) and expose its root element as `el` (what
+// window.__state(t) reads to say which scenes are on screen).
 // shakes: [[t0, amplitudePx, decayPerSecond]]; flashes: [[t0, color, [opacity per frame...]]].
 // camera (optional): a track (e.g. from cameraTrack()) whose .at(t) returns [x, y, zoom] to
 // apply to `cam` every frame (transform-origin is 0 0, so zoom != 1 needs x/y already computed to
@@ -130,6 +132,65 @@ export async function run(app, scenes, { shakes = [], flashes = [], camera, post
     flash.style.background = fc;
     flash.style.opacity = fo;
     if (post) post(t);
+  };
+  // window.__state(t): what the composition is doing at t, as data -- for the studio's readout, and
+  // for anything that needs to name what is on screen. It reads and paints nothing else, so renderAt is
+  // unchanged. bar/beat/cue/next come from the timeline alone. `scenes` lists the scenes whose root
+  // element (`el`) is displayed, i.e. the DOM as of the last renderAt: call renderAt(t) first when it
+  // must describe t. Defined before __ready, which is the signal that every hook exists.
+  const cueList = tl.cues.map((c) => ({ name: c.name, t: tl.B(c.beat) })).sort((a, b) => a.t - b.t);
+  window.__state = (t) => {
+    t = clamp(t, 0, tl.DUR - 1e-6);
+    const x = t - tl.B(1), eps = 1e-9;
+    const cue = cueList.filter((c) => c.t <= t + eps).pop() ?? null;
+    const next = cueList.find((c) => c.t > t + eps) ?? null;
+    return {
+      t, frame: frameOf(t, tl.FPS),
+      bar: x < 0 ? 0 : Math.floor(x / tl.BAR + eps) + 1,               // 1-based; 0 before the first beat
+      beat: x < 0 ? 0 : Math.min(4, Math.floor((x % tl.BAR) / tl.BEAT + eps) + 1),
+      cue: cue && { name: cue.name, t: cue.t },
+      next: next && { name: next.name, in: next.t - t },
+      scenes: scenes.flatMap((sc, index) => (sc.el instanceof Element && sc.el.isConnected && (sc.el.checkVisibility?.() ?? sc.el.style.display !== "none")
+        ? [{ index, name: sc.name ?? `scene${index}` }] : [])),
+    };
+  };
+  // window.__pick(x, y): what is at a point of the frame, for pointing at a problem (studio.html). x, y are
+  // video pixels, i.e. where it shows AFTER the camera. Returns { stage, target, scene }: `stage` is the same
+  // point with the camera undone (the coordinates scenes lay themselves out in), `target` the topmost element
+  // there that is not just a full-frame wrapper (tag, class, text, rect, path) or null, `scene` the scene
+  // containing the topmost thing there ({ index, name }) or null. A pure read of the last painted frame.
+  const r1 = (v) => Math.round(v * 10) / 10;
+  const isBackdrop = (el) => el === document.documentElement || el === document.body || el === app.stage || el === cam || el === flash
+    || scenes.some((sc) => sc.el === el);
+  window.__pick = (x, y) => {
+    const inv = new DOMMatrixReadOnly(getComputedStyle(cam).transform).inverse();
+    const sp = inv.transformPoint({ x, y });
+    const stage = Number.isFinite(sp.x) && Number.isFinite(sp.y) ? { x: r1(sp.x), y: r1(sp.y) } : { x: r1(x), y: r1(y) };
+    const hits = document.elementsFromPoint(x, y);
+    let scene = null;
+    for (const el of hits) {
+      const index = scenes.findIndex((sc) => sc.el instanceof Element && sc.el.contains(el));
+      if (index >= 0) { scene = { index, name: scenes[index].name ?? `scene${index}` }; break; }
+    }
+    const el = hits.find((e) => {
+      if (isBackdrop(e)) return false;
+      const b = e.getBoundingClientRect();
+      return !(b.width >= 0.9 * tl.W && b.height >= 0.9 * tl.H); // a full-frame layer says nothing about where you pointed
+    });
+    let target = null;
+    if (el) {
+      const b = el.getBoundingClientRect(), path = [];
+      for (let e = el; e && e !== app.stage && e !== document.body; e = e.parentElement) {
+        const cls = (e.getAttribute("class") || "").split(/\s+/).filter(Boolean).slice(0, 2).map((c) => `.${c}`).join("");
+        path.unshift(`${e.tagName.toLowerCase()}${cls}:nth-child(${[...e.parentElement.children].indexOf(e) + 1})`);
+      }
+      target = {
+        tag: el.tagName.toLowerCase(), class: (el.getAttribute("class") || "").slice(0, 200),
+        text: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80),
+        rect: { x: r1(b.x), y: r1(b.y), w: r1(b.width), h: r1(b.height) }, path: `#stage > ${path.join(" > ")}`.slice(0, 400),
+      };
+    }
+    return { stage, target, scene };
   };
   window.__ready = true;
   const q = new URLSearchParams(location.search).get("t");

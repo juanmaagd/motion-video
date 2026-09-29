@@ -6,6 +6,7 @@
     "preview": "node build.mjs --preview",
     "build": "node build.mjs",
     "stills": "node render.mjs stills --beats",
+    "studio": "node studio.mjs",
     "audio": "node score.mjs",
     "inspect": "./inspect.sh",
     "logos": "node logos.mjs",

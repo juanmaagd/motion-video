@@ -8,6 +8,7 @@ A short motion-graphics video rendered from code: every frame is `renderAt(t)` i
 npm install                      # playwright-core only; browsers come from the Playwright cache or CHROME_PATH
 python3 -m pip install -r requirements.txt   # numpy, Pillow (used by qa.py, sheet.py, detect-frame.py, logoqa.py)
 npm run stills                   # one still per beat -> out/stills (half size)
+npm run studio                   # live preview at http://127.0.0.1:4321: the composition reloads on every save, audio is regenerated from score.mjs
 npm run preview                  # fast pass: 1 sample, half size -> out/<slug>-preview.mp4 + contact sheet + QA
 npm run build                    # final: 32 motion-blur samples, full size -> <slug>.mp4 + web.mp4 + poster + contact sheet + QA
 node build.mjs --slice=3.5:4.5   # final settings on one moment
@@ -28,8 +29,8 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 
 | File | Edit per video? | Role |
 |---|---|---|
-| `timeline.json` | yes | fps, width, height, duration, bpm, loudness targets, `holds`/`lagThreshold`/`lagProofEnd` (lag proof), `pictureSyncWindow`, `webSizeBudget`/`webCrf`, and named cues on the beat grid (`hit: true` = sync-checked). |
-| `brand.json` | yes | colors by role, font files in `fonts/`, logo in `brand/`, copy strings, optional `colorProbes` (qa.py colour decode). Missing files fall back to system fonts and a disc mark. |
+| `timeline.json` | yes (the studio's Tweak tab edits cue `beat`/`hit`) | fps, width, height, duration, bpm, loudness targets, `holds`/`lagThreshold`/`lagProofEnd` (lag proof), `pictureSyncWindow`, `webSizeBudget`/`webCrf`, and named cues on the beat grid (`hit: true` = sync-checked). |
+| `brand.json` | yes (the Tweak tab edits colors, copy, name, wordmark) | colors by role, font files in `fonts/`, logo in `brand/`, copy strings, optional `colorProbes` (qa.py colour decode). Missing files fall back to system fonts and a disc mark. |
 | `index.html` | yes | the scenes. Each scene is `{ init(app), render(t) }`; `render` depends on `t` only. The demo shows a title slam (with an anticipation ring before the drop), a door match-cut into a kinetic list (headline via `engine.js`'s sequencer), and a logo lockup; a never-parked camera track and canvas grain run underneath. |
 | `score.mjs` | yes | the soundtrack arrangement: synth-kit voices placed on cues. |
 | `engine.js` | no | easing kit, spring/punch/pchip, a never-parked camera track, a headline sequencer, an anticipation ring, a feathered radial-mask reveal, a fill/outline crossfade, canvas grain, hashed RNG, decode text, camera shake, particle burst, DOM and layout helpers. |
@@ -44,7 +45,10 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 | `cta-check.sh` | no | verify an npm dist-tag, a URL, or a GitHub repo before it appears on screen. |
 | `archive.sh` | no | snapshot outputs + source (sans `node_modules`) into `vN/` before a revision. |
 | `determinism.mjs` | no | forward vs reversed frame-order capture must be pixel-identical. |
+| `serve.mjs` | no | the static file server behind `render.mjs` and `determinism.mjs`: GET/HEAD only, contained to this folder by real path (no `..`, no symlink out), no dotfiles or `node_modules`. |
+| `feedback.json` | working file | the review notes made by clicking the frame in the studio (`npm run studio`): time, scene, element, point and text per note, each `open`, `resolved` or `wontfix` with a one-line `resolution`. Created on the first note. Keep it out of git; `archive.sh` copies it into `vN/src/`. |
+| `studio.mjs`, `studio.html` | no | the live preview: a 127.0.0.1-only server (per-run token, Host and Origin checks on every write) that watches this folder, pushes reloads over server-sent events (holding one back and naming the file and line when a `.html`, `.js` or `.mjs` file has a syntax error), regenerates the audio from `score.mjs`, keeps the review notes, and applies the Tweak tab's edits (`POST /api/tweak`: cue beat and hit, brand colours, copy, name and wordmark, nothing else); plus the page it serves. |
 | `gen-image.mjs` | no | optional: one raster plate/texture via the Codex CLI's own built-in image tool, no fallback; records `generated/manifest.json`. |
 | `generated/` | maybe | `manifest.json` (empty by default) + any files `gen-image.mjs` writes. |
 
-Open a single frame in a browser: serve this folder (`npx serve .`) and load `index.html?t=2.3`.
+Open a single frame in a browser: `npm run studio` and load `http://127.0.0.1:4321/?t=2.3` (Chrome or Chromium; `?loop=2:4` loops a range).

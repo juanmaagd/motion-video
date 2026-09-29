@@ -19,7 +19,8 @@
 <div id="stage"></div>
 <script type="module">
 // Starter composition. Replace the demo scenes with the storyboard; keep the contract:
-// every scene is { init(app), render(t) } and render(t) depends on t only.
+// every scene is { init(app), render(t) } and render(t) depends on t only. `name` is optional (the
+// studio shows it); a scene that sets `this.el` to its root element is listed by window.__state(t).
 import * as K from "./engine.js";
 const { E, clamp, lerp, prog, h, s, show, px, tf, zoomAbout } = K;
 
@@ -57,6 +58,7 @@ const grain = K.createGrain(grainCanvas, W, H, FPS);
 // ================================================================== HUD ====
 // A hairline frame with mono corner labels: a static anchor while the shots move.
 const Hud = {
+  name: "hud",
   init({ cam }) {
     this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam);
     const g = s("svg", { width: W, height: H, class: "abs" }, this.el);
@@ -83,6 +85,7 @@ const Hud = {
 // variable-font punch; everything folds back into the line, which snaps vertical.
 // On the drop the field splits like doors (match cut into the next scene).
 const Title = {
+  name: "title",
   init({ cam }) {
     const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
     // full-frame backgrounds bleed 40 px past the edges so camera shake never shows the stage
@@ -145,6 +148,7 @@ const Title = {
 // Revealed by the doors. A mixed-weight title, then one row per beat: the text rises inside
 // its row, the check draws. Exits with a whip zoom into the last check.
 const Features = {
+  name: "features",
   init({ cam }) {
     const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
     this.rh = Math.round(118 * u);
@@ -189,6 +193,7 @@ const Features = {
 // The mark pops on the hit (starting 30 ms early so the hit frame shows it), slides aside
 // while the wordmark slides out from behind it, then the tagline; slow push to the end.
 const Lockup = {
+  name: "lockup",
   init({ cam }) {
     const el = (this.el = h("div", { class: "shot", style: { width: px(W), height: px(H) } }, cam));
     this.L = (F.portrait ? 150 : 132) * u;           // mark height

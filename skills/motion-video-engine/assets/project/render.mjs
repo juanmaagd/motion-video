@@ -12,12 +12,12 @@
 // the CDP Page.captureScreenshot(optimizeForSpeed) path (see openPage/capture below), not
 // page.screenshot() — same lossless PNG, about 3x faster.
 import { chromium } from "playwright-core";
-import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createStaticHandler, listen } from "./serve.mjs";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const TL = JSON.parse(fs.readFileSync(path.join(ROOT, "timeline.json"), "utf8"));
@@ -45,18 +45,6 @@ function findChrome() {
   throw new Error("No Chromium headless shell found. Run `npx playwright install chromium-headless-shell` or set CHROME_PATH to a Chrome/Chromium binary.");
 }
 
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".woff2": "font/woff2",
-  ".woff": "font/woff", ".ttf": "font/ttf", ".otf": "font/otf", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp" };
-function serve() {
-  const server = http.createServer((req, res) => {
-    const p = path.join(ROOT, decodeURIComponent(new URL(req.url, "http://x").pathname));
-    if (!p.startsWith(ROOT) || !fs.existsSync(p) || fs.statSync(p).isDirectory()) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "content-type": TYPES[path.extname(p)] || "application/octet-stream" });
-    fs.createReadStream(p).pipe(res);
-  });
-  return new Promise((r) => server.listen(0, "127.0.0.1", () => r(server)));
-}
-
 const launch = () => chromium.launch({ executablePath: findChrome(), args: ["--font-render-hinting=none", "--hide-scrollbars", "--force-color-profile=srgb"] });
 async function openPage(browser, url, scale) {
   const page = await browser.newPage({ viewport: { width: TL.width, height: TL.height }, deviceScaleFactor: scale });
@@ -81,7 +69,7 @@ async function capture(page, t) {
 }
 const beat = 60 / TL.bpm;
 
-const server = await serve();
+const server = await listen(createStaticHandler(ROOT));
 const url = `http://127.0.0.1:${server.address().port}/index.html`;
 const started = Date.now();
 try {
