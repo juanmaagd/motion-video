@@ -6,12 +6,12 @@ report contract is how scope creeps.
 
 ## Boundaries
 
-- Project directory: `<path>` (a copy of `assets/template/`; the worker edits scenes, `score.mjs`,
+- Project directory: `<path>` (the assembled project, `references/workflow.md` section 1; the worker edits scenes, `score.mjs`,
   `timeline.json`, `brand.json` -- never `engine.js`, `synth-kit.mjs`, `render.mjs`, `build.mjs`,
   `qa.py`, or any other tool file unless this brief explicitly says otherwise).
 - Approved script table / claims / CTAs: link to the completed `brief.md`. The worker does not
   invent new copy, numbers, or claims -- anything missing comes back as a question, not a guess.
-- Brand bans in force: <copy from brief.md or brand-extraction.md>.
+- Brand bans in force: <copy from brief.md or from `brand-extraction.md` in the `motion-video-brand` skill>.
 - Budget / time box: <e.g. "two review passes, then hand back for final QA">.
 - Generated assets: only the rows approved in `brief.md`'s "Generated assets" table, via
   `gen-image.mjs` (no other provider); if `codex` is unavailable the worker builds the element in
@@ -29,7 +29,7 @@ Do not proceed past this without director sign-off:
 - [ ] `npm run preview` succeeds
 - [ ] Beat contact sheet + 12-frame strips around every transition (paths)
 - [ ] Lag proof passes on the preview (`python3 lagproof.py out/<slug>-preview.mp4`)
-- [ ] Every item in `references/pitfalls.md` that applies has been checked
+- [ ] Every item in the `references/pitfalls.md` of `motion-video-engine`, `motion-video-sound`, `motion-video-qa` and `motion-video-brand` that applies has been checked
 
 Use `assets/templates/review-notes.md`-shaped notes for the reply, not prose.
 
@@ -40,7 +40,7 @@ On stopping (checkpoint reached, blocked, or done), the worker reports:
 1. What was built (scenes/cues touched, since the last archive).
 2. Every check run and its actual result (PASS/FAIL/WARN with numbers -- never "should be fine").
 3. Deviations from the brief and why.
-4. What was NOT verified (always: whether the audio was listened to, per references/sound-design.md).
+4. What was NOT verified (always: whether the audio was listened to, per `sound-design.md` in the `motion-video-sound` skill).
 5. The exact next step it is blocked on, if any.
 
 The director never treats a worker's summary as verification -- re-run at least the lag proof and

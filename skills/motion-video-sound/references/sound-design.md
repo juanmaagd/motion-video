@@ -50,7 +50,7 @@ Processors: `duck(kickTimes)` (music bus only), `tapeStop(t0, t1, tEnd)` (drums 
 
 ## Mix targets
 
-Integrated −14 LUFS ±1 (streaming/social norm), true peak ≤ −1 dBTP, LRA 3–8 LU. The kit normalizes loudness and lowers the limiter ceiling until its true-peak estimate clears the target; `qa.py` re-measures the MP4 with ffmpeg `ebur128`. Without ears, also look at `ffmpeg -i out/.build/audio.wav -lavfi showspectrumpic=s=1600x512:legend=1 spec.png` and `showwavespic` — silence where planned, hits where the cues are. `inspect.sh` runs both of these (plus loudness and the lag proof) in one pass for the independent verification step of the director loop (`workflow.md`).
+Integrated −14 LUFS ±1 (streaming/social norm), true peak ≤ −1 dBTP, LRA 3–8 LU. The kit normalizes loudness and lowers the limiter ceiling until its true-peak estimate clears the target; `qa.py` re-measures the MP4 with ffmpeg `ebur128`. Without ears, also look at `ffmpeg -i out/.build/audio.wav -lavfi showspectrumpic=s=1600x512:legend=1 spec.png` and `showwavespic` — silence where planned, hits where the cues are. `inspect.sh` runs both of these (plus loudness and the lag proof) in one pass for the independent verification step of the director loop (`workflow.md` in the `motion-video` skill).
 
 ## Onset detection (how qa.py measures sync)
 

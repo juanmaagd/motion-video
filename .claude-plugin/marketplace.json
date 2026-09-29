@@ -1,0 +1,25 @@
+{
+  "name": "motion-video",
+  "owner": {
+    "name": "juanmaagd"
+  },
+  "metadata": {
+    "description": "A family of five Agent Skills that render short, beat-synced motion-graphics videos from code."
+  },
+  "plugins": [
+    {
+      "name": "motion-video",
+      "source": "./",
+      "description": "The motion-video director plus its engine, sound, qa and brand skills. Install all five: the director builds each video project from files that every skill ships.",
+      "license": "Apache-2.0",
+      "keywords": ["motion-graphics", "video", "animation", "beat-sync"],
+      "skills": [
+        "./skills/motion-video",
+        "./skills/motion-video-engine",
+        "./skills/motion-video-sound",
+        "./skills/motion-video-qa",
+        "./skills/motion-video-brand"
+      ]
+    }
+  ]
+}

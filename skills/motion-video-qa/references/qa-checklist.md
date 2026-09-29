@@ -10,7 +10,7 @@
 |---|---|---|
 | Size | exactly `width x height` (x `--scale` for previews) | H.264, yuv420p |
 | Frame rate | `fps`/1 | |
-| Frames / duration | `round(duration * fps)` ±1 frame | a 901-frame render meant segment drift (see pitfalls) |
+| Frames / duration | `round(duration * fps)` ±1 frame | a 901-frame render meant segment drift (pitfall 2, in the `motion-video-engine` skill) |
 | Audio | present, 48 kHz, stereo | AAC 256k in the MP4 |
 | Loudness | `loudness` ±1 LU (default −14 LUFS integrated) | ffmpeg `ebur128` |
 | True peak | ≤ `truePeak` (default −1 dBTP) | |
@@ -53,7 +53,7 @@ Expect `h264 High`, `yuv420p`, `bt709` for space, primaries and transfer, the ri
 | Full-size stills | text crisp (no soft 3D layers), nothing clipped or colliding, descenders intact, labels ≥ 14 px at 1080p |
 | Timing | readable content lands on its beat; decoders resolve and hold ≥ 0.3 s; the lockup holds ≥ 1 s; every headline respected its readable-time guard (`makeHeadline`) |
 | Logo | logo-fidelity report reviewed (above); brand-provided marks used exactly as fetched by `logos.mjs`, no non-open licence shipped unverified |
-| Brand bans | no invented numbers or claims; colors only in their roles; no banned motifs in picture or sound; every claim traced to a tested/supported source (`assets/templates/brief.md`) |
+| Brand bans | no invented numbers or claims; colors only in their roles; no banned motifs in picture or sound; every claim traced to a tested/supported source (`assets/templates/brief.md` in the `motion-video` skill) |
 | CTAs | every on-screen npm command, URL and repo verified with `cta-check.sh`, re-run once right before delivery |
 | Motion blur | final at 32 samples: no visible sample steps on the fastest move (check the whip/slam frames) |
 | Loop (stings) | `renderAt(0)` and the last frame match; the audio tail wraps |

@@ -44,8 +44,8 @@ anything not listed is reachable through its automatic "Other" field.
 - Q1: a custom duration goes through "Other".
 - Q2: "Decide for me" means delegate everything — the agent originates the concept end to end.
 - Q3: a social clip or brand sting goes through "Other".
-- Q4: "Decide for me" means match the brand's own tone when one was extracted (`brand-extraction.md`);
-  otherwise the agent picks and states why.
+- Q4: "Decide for me" means match the brand's own tone when one was extracted (`brand-extraction.md`
+  in the `motion-video-brand` skill); otherwise the agent picks and states why.
 
 Format, soundtrack and brand source are NOT folded in here — they keep their own existing Decision
 Gates rows (SKILL.md) and are asked separately only when they still have no default after this
@@ -61,12 +61,13 @@ intake.
   - *A rough direction* -> propose 2-3 concrete storyboard directions off that steer, for the user
     to pick one at the script-table approval step (Hard Rule 5) — do not build all of them.
   - *Decide for me* -> delegate everything: the agent originates the concept end to end (real
-    evidence only, per `brand-extraction.md`'s "real evidence only" rule — delegation never
-    licenses an invented number or claim), and still gets the script table approved before building
+    evidence only, per the "real evidence only" rule in `brand-extraction.md` of the
+    `motion-video-brand` skill — delegation never licenses an invented number or claim), and still gets the script table approved before building
     copy into scenes; delegating the IDEA never skips the APPROVAL gate.
 - **Video type** -> picks the matching narrative template in `storyboard.md` (the existing "Video
   type" gate): launch/showreel -> "Launch" or "Showreel" template; explainer -> "Feature explainer";
-  product demo -> the "Product demo" template (`storyboard.md`, `scene-recipes.md`); anything else
+  product demo -> the "Product demo" template (`storyboard.md`, and `scene-recipes.md` in the
+  `motion-video-engine` skill); anything else
   (a social clip, a brand sting) is named through "Other" and maps to its own matching template.
 - **Style** -> informs motion and type choices WITHIN the chosen template, never overrides brand
   bans or evidence rules:
@@ -74,10 +75,11 @@ intake.
     hits.
   - *Bold kinetic type* -> larger display type, more per-bar hits, `makeHeadline` (`engine.js`) used
     aggressively.
-  - *Playful/illustrative* -> favors the SVG draw-on recipe (`scene-recipes.md`) and softer,
+  - *Playful/illustrative* -> favors the SVG draw-on recipe (`scene-recipes.md` in the
+    `motion-video-engine` skill) and softer,
     bouncier easing (`E.outBack`-family curves) over hard cuts.
   - *Decide for me* -> match the brand: no added style layer at all; defer entirely to whatever
-    tone `brand-extraction.md`'s own extraction already found when one was run (a brand's existing
+    tone the extraction of the `motion-video-brand` skill (`brand-extraction.md`) already found when one was run (a brand's existing
     type/motion signals win over any generic "style" default). With no brand source at all, the
     agent picks a style and states why in the brief.
 

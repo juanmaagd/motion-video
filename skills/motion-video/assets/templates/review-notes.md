@@ -23,8 +23,10 @@ and what PASS looks like.
 Priority levels: **blocking** (must fix before the next checkpoint), **advisory** (fix if cheap,
 otherwise note as a known tradeoff and move on).
 
-Cross-check every note against `references/pitfalls.md` before writing it -- if it is a known
-failure mode, cite the pitfall number instead of re-describing it.
+Cross-check every note against the `references/pitfalls.md` of the sibling skills
+(`motion-video-engine`, `motion-video-sound`, `motion-video-qa`, `motion-video-brand`; numbers are
+shared across them) before writing it -- if it is a known failure mode, cite the pitfall number
+instead of re-describing it.
 
 ## Not reviewed / deferred
 

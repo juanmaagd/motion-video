@@ -7,7 +7,7 @@ Rules with numbers. Function names refer to `engine.js`.
 - A frame is `renderAt(t)` and nothing else: no CSS transitions/animations, no rAF state, no `Math.random`. Use `hash(i, j, seed)` for randomness and `frameOf(t, fps)` to quantize flicker/scrambles to the output frame (sub-samples of one frame then agree, so blur never smears them).
 - Keep each scene a pure `render(t)`: compute progress with `prog(t, t0, dur)`, ease it, set styles. Hide scenes outside their window with `show(el, cond)`.
 - Never composite an effect layer with a CSS blend mode (`mix-blend-mode`): headless Chromium can composite it against a stale backdrop and leak pixels from one frame into another, invisible in a spot check but fatal to a chunked/parallel render. Draw texture (`createGrain`) as signed-alpha specks composited normally. Prove any new canvas/filter layer with `determinism.mjs` (forward vs reversed frame-order capture must be pixel-identical) before trusting it in a parallel render.
-- "Deterministic" is necessary but not sufficient — it must also never look frozen. The lag proof (`lagproof.py`, `qa.py`) is the objective check: no run of stepped or frozen frames outside a declared hold. See Camera below and `qa-checklist.md`.
+- "Deterministic" is necessary but not sufficient — it must also never look frozen. The lag proof (`lagproof.py`, `qa.py`) is the objective check: no run of stepped or frozen frames outside a declared hold. See Camera below and `qa-checklist.md` in the `motion-video-qa` skill.
 
 ## Easing
 
