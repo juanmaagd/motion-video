@@ -419,6 +419,132 @@ it("the notes panel lists open notes by time, jumps to one with its pin, and col
   fs.rmSync(feedbackFile, { force: true });
 });
 
+// ------------------------------------------------------------------------- tweak ----
+const tweakInput = (page, label) => page.locator(`#tweakPanel input[aria-label="${label}"]`);
+const openTweak = async (page) => { await page.click("#tabTweak"); await page.waitForSelector("#twCues .field"); };
+// Runs fn, then restores the given project files to their original bytes.
+async function restoring(names, fn) {
+  const saved = names.map((n) => [n, fs.readFileSync(path.join(root, n))]);
+  try { await fn(); } finally { for (const [n, b] of saved) fs.writeFileSync(path.join(root, n), b); await sleep(700); }
+}
+
+it("changing a colour in the panel and saving repaints the composition with it", async () => {
+  await restoring(["brand.json"], async () => {
+    const page = await open("?t=2.5");
+    const bg = () => page.evaluate(() => { const d = document.getElementById("comp").contentDocument; return [d.defaultView.getComputedStyle(d.getElementById("stage")).backgroundColor, d.documentElement.style.getPropertyValue("--bg")]; });
+    assert.deepEqual(await bg(), ["rgb(255, 255, 255)", "#ffffff"]);
+    await openTweak(page);
+    assert.equal(await page.isDisabled("#tweakSave"), true, "nothing to save yet");
+    await tweakInput(page, "bg hex").fill("#123456");
+    assert.equal(await page.textContent("#dirty"), "●", "the unsaved-changes marker");
+    assert.match(await page.textContent("#tweakStatus"), /1 unsaved change/);
+    assert.equal(await tweakInput(page, "bg colour").inputValue(), "#123456", "the picker follows the hex field");
+    assert.deepEqual(await bg(), ["rgb(255, 255, 255)", "#ffffff"], "nothing changes on screen until Save");
+    await page.click("#tweakSave");
+    await page.waitForFunction(() => __studio.loads === 2, null, { timeout: 8000 });
+    assert.deepEqual(await bg(), ["rgb(18, 52, 86)", "#123456"], "the composition was reloaded with the new colour");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, "brand.json"), "utf8")).colors.bg, "#123456");
+    assert.equal(await page.textContent("#dirty"), "");
+    assert.equal(await page.isDisabled("#tweakSave"), true);
+    assert.equal((await studioState(page)).rendered, 2.5, "and t stayed where it was");
+    await page.context().close();
+  });
+});
+
+it("the cue list nudges a beat by 1/16, jumps to the cue, saves, and the audio is regenerated", async () => {
+  await restoring(["timeline.json"], async () => {
+    const page = await open();
+    await openTweak(page);
+    const beat = tweakInput(page, "word1 beat");
+    assert.equal(await beat.inputValue(), "2");
+    assert.equal(await page.locator("#twCues .field label", { hasText: "word1" }).count(), 1, "the cue's name is shown, and there is nothing to edit it with");
+    assert.equal(await page.locator("#twCues .field input[type=text]").count(), 0);
+    await page.locator("#twCues .field", { hasText: "word1" }).locator("button", { hasText: "+" }).click();
+    assert.equal(await beat.inputValue(), "2.0625");
+    await page.locator("#twCues .field", { hasText: "word1" }).locator("button", { hasText: "Jump" }).click();
+    assert.equal((await studioState(page)).t, Math.round(((2.0625 - 1) * 60 / 128) * 60) / 60, "jumps to the (unsaved) beat's frame");
+    await page.locator("#twCues .field", { hasText: "word1" }).locator("button", { hasText: "−" }).click();
+    await page.locator("#twCues .field", { hasText: "word1" }).locator("button", { hasText: "−" }).click();
+    assert.equal(await beat.inputValue(), "1.9375");
+    assert.equal(await page.isEnabled("#tweakSave"), true);
+    await page.locator("#twCues .field", { hasText: "word1" }).locator("button", { hasText: "+" }).click();
+    assert.equal(await beat.inputValue(), "2");
+    assert.equal(await page.isDisabled("#tweakSave"), true, "back to the saved value is no change at all");
+    assert.equal(await page.textContent("#dirty"), "");
+
+    await beat.fill("2.25");
+    await page.locator("#twCues .field", { hasText: "open" }).locator('input[type=checkbox]').check();
+    await page.locator("#twCues .field", { hasText: "open" }).locator('input[type=checkbox]').uncheck();
+    assert.match(await page.textContent("#tweakStatus"), /^1 unsaved change$/, "a hit toggled on and off is not a change");
+    await page.click("#tweakSave");
+    await page.waitForFunction(() => __studio.loads === 2, null, { timeout: 8000 });
+    const tl = JSON.parse(fs.readFileSync(path.join(root, "timeline.json"), "utf8"));
+    assert.deepEqual([tl.cues[1].name, tl.cues[1].beat, "hit" in tl.cues[0]], ["word1", 2.25, false]);
+    await page.waitForFunction(() => document.getElementById("audio").textContent.includes("ready"), null, { timeout: 15000 });
+    await page.context().close();
+  });
+});
+
+it("an out-of-range beat is flagged and cannot be saved", async () => {
+  const page = await open();
+  await openTweak(page);
+  const beat = tweakInput(page, "word2 beat");
+  await beat.fill("99");
+  assert.equal(await beat.evaluate((e) => e.classList.contains("invalid")), true);
+  assert.equal(await page.isDisabled("#tweakSave"), true);
+  assert.match(await page.textContent("#tweakStatus"), /fix the highlighted fields/);
+  await beat.fill("");
+  assert.equal(await page.isDisabled("#tweakSave"), true);
+  await tweakInput(page, "caption").fill("a valid edit elsewhere");
+  assert.equal(await page.isDisabled("#tweakSave"), true, "a valid edit does not make a broken field saveable");
+  await tweakInput(page, "caption").fill("Rendered from code · every frame f(t)");
+  await beat.fill("2.75");
+  assert.equal(await page.isEnabled("#tweakSave"), true);
+  assert.equal(await beat.evaluate((e) => e.classList.contains("invalid")), false);
+  await page.click("#tweakRevert");
+  await page.waitForFunction(() => document.querySelector('#tweakPanel input[aria-label="word2 beat"]').value === "2.5");
+  assert.equal(await page.isDisabled("#tweakSave"), true);
+  await page.context().close();
+});
+
+it("copy fields: a string, a list of strings and a headline pair each save with their own shape; Revert restores them", async () => {
+  await restoring(["brand.json"], async () => {
+    const page = await open();
+    await openTweak(page);
+    await tweakInput(page, "caption").fill("A new caption");
+    await tweakInput(page, "features[1]").fill("Second thing");
+    await tweakInput(page, "headline[2][0]").fill("pure!");
+    await tweakInput(page, "headline[2][1] weight").fill("700");
+    assert.match(await page.textContent("#tweakStatus"), /3 unsaved changes/, "the list and the pair are each one change");
+    await page.click("#tweakRevert");
+    await page.waitForFunction(() => document.querySelector('#tweakPanel input[aria-label="caption"]').value === "Rendered from code · every frame f(t)");
+    assert.equal(await page.textContent("#dirty"), "");
+    await tweakInput(page, "features[1]").fill("Second thing");
+    await tweakInput(page, "headline[2][1] weight").fill("700");
+    await tweakInput(page, "wordmark").fill("acme");
+    await page.click("#tweakSave");
+    await page.waitForFunction(() => __studio.loads === 2, null, { timeout: 8000 });
+    const b = JSON.parse(fs.readFileSync(path.join(root, "brand.json"), "utf8"));
+    assert.deepEqual([b.copy.features, b.copy.headline[2], b.wordmark], [["Deterministic frames", "Second thing", "Beat-synced sound"], ["pure", 700], "acme"]);
+    assert.equal(b.copy.caption, "Rendered from code · every frame f(t)");
+    await page.context().close();
+  });
+});
+
+it("unsaved edits survive the composition reloading underneath them", async () => {
+  const page = await open();
+  await openTweak(page);
+  await tweakInput(page, "caption").fill("typed but not saved");
+  await withFile("index.html", (s) => s + "\n<!-- touched -->\n", async () => {
+    await page.waitForFunction(() => __studio.loads === 2, null, { timeout: 8000 });
+  });
+  await page.waitForFunction(() => __studio.loads === 3, null, { timeout: 8000 });
+  assert.equal(await tweakInput(page, "caption").inputValue(), "typed but not saved");
+  assert.equal(await page.textContent("#dirty"), "●");
+  assert.equal(await page.isEnabled("#tweakSave"), true);
+  await page.context().close();
+});
+
 // ---------------------------------------------------------------------- reloading ----
 it("saving index.html swaps in the new composition, keeps t, and keeps playing", async () => {
   const page = await open("?t=1.2");

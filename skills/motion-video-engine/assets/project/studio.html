@@ -30,6 +30,24 @@
   #side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; padding: 12px; background: var(--panel); border-left: 1px solid var(--line); }
   #side h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
   .muted { color: var(--muted); margin: 0; }
+  #tabs { display: flex; gap: 6px; }
+  #tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  section { display: flex; flex-direction: column; gap: 10px; }
+  #side h3 { margin: 8px 0 0; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .tw-actions { display: flex; align-items: center; gap: 8px; position: sticky; top: -12px; z-index: 1; padding: 8px 0; background: var(--panel); }
+  #tweakStatus { color: var(--muted); font-size: 11px; }
+  #tweakStatus.bad { color: var(--bad); }
+  #tweakStatus.dirty { color: #e0af68; }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field label { flex: 0 0 76px; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .field input[type=text], .field input[type=number] { min-width: 0; flex: 1; padding: 3px 6px; background: #101215; border: 1px solid var(--line); border-radius: 4px; color: inherit; font: inherit; }
+  .field input[type=number] { flex: 0 0 74px; }
+  .field input[type=color] { flex: 0 0 30px; width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); background: none; }
+  .field input:invalid, .field input.invalid { border-color: var(--bad); }
+  .field button { padding: 2px 6px; font-size: 11px; }
+  .field .ro { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .col { display: flex; flex-direction: column; gap: 6px; }
   ul.notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .note { padding: 8px 10px; background: #22252a; border: 1px solid var(--line); border-radius: 5px; cursor: pointer; }
   .note:hover, .note.sel { border-color: var(--accent); }
@@ -87,11 +105,23 @@
     <div id="overlay" hidden role="alert"><div class="box"><h2 id="errTitle"></h2><pre id="errBody"></pre></div></div>
   </main>
   <aside id="side">
-    <h2>Notes <span id="noteCount"></span></h2>
-    <p class="muted" id="noNotes">Click the frame to leave a note: it records the time, the scene and the element you pointed at.</p>
-    <ul class="notes" id="openNotes"></ul>
-    <details id="doneBox" hidden><summary>Resolved (<span id="doneCount">0</span>)</summary><ul class="notes" id="doneNotes"></ul></details>
-    <p class="muted" id="notesErr" role="alert"></p>
+    <nav id="tabs">
+      <button type="button" id="tabNotes" aria-pressed="true">Notes <span id="noteCount"></span></button>
+      <button type="button" id="tabTweak" aria-pressed="false">Tweak <span id="dirty" title="unsaved changes"></span></button>
+    </nav>
+    <section id="notesPanel">
+      <p class="muted" id="noNotes">Click the frame to leave a note: it records the time, the scene and the element you pointed at.</p>
+      <ul class="notes" id="openNotes"></ul>
+      <details id="doneBox" hidden><summary>Resolved (<span id="doneCount">0</span>)</summary><ul class="notes" id="doneNotes"></ul></details>
+      <p class="muted" id="notesErr" role="alert"></p>
+    </section>
+    <section id="tweakPanel" hidden>
+      <div class="tw-actions"><button type="button" id="tweakSave" disabled>Save</button><button type="button" id="tweakRevert" disabled>Revert</button><span id="tweakStatus"></span></div>
+      <h3>Cues</h3><div id="twCues" class="col"></div>
+      <h3>Colours</h3><div id="twColors" class="col"></div>
+      <h3>Brand</h3><div id="twBrand" class="col"></div>
+      <h3>Copy</h3><div id="twCopy" class="col"></div>
+    </section>
   </aside>
 </div>
 
@@ -579,6 +609,137 @@ function selectNote(id) {
   renderNotes();
 }
 
+// ------------------------------------------------------------------------ tweak ----
+// The Tweak tab edits a short allowlist of data (cue beats and hits, brand colours, copy, name, wordmark) and
+// sends only what changed to POST /api/tweak. Nothing is written until Save; Revert drops the edits. An edit
+// stays until saved or reverted even when the files reload underneath it.
+const T = { base: null, edits: new Map(), invalid: new Set() };
+const getPath = (doc, path) => path.split(/[.\[\]]+/).filter(Boolean).reduce((v, k) => (v == null ? undefined : v[k]), doc);
+const valueOf = (file, path) => { const e = T.edits.get(`${file}:${path}`); return e ? e.value : getPath(T.base[file], path); };
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const beatTime = (beat) => (T.base.timeline.offset ?? 0) + (beat - 1) * (60 / T.base.timeline.bpm);
+const beatOk = (beat) => Number.isFinite(beat) && beatTime(beat) >= -1e-9 && beatTime(beat) <= T.base.timeline.duration + 1e-9;
+const hex6 = (h) => (h.length === 4 ? `#${[...h.slice(1)].map((c) => c + c).join("")}` : h);
+const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function edit(file, path, value, ok = true, whenMissing) {
+  const k = `${file}:${path}`;
+  if (ok) { T.invalid.delete(k); if (same(value, getPath(T.base[file], path) ?? whenMissing)) T.edits.delete(k); else T.edits.set(k, { file, path, value }); } else T.invalid.add(k);
+  syncTweak();
+}
+function syncTweak() {
+  const dirty = T.edits.size > 0 || T.invalid.size > 0;
+  $("dirty").textContent = dirty ? "●" : "";
+  $("tweakSave").disabled = T.edits.size === 0 || T.invalid.size > 0;
+  $("tweakRevert").disabled = !dirty;
+  const st = $("tweakStatus");
+  if (T.invalid.size) { st.textContent = "fix the highlighted fields"; st.className = "bad"; }
+  else if (T.edits.size) { st.textContent = `${T.edits.size} unsaved change${T.edits.size > 1 ? "s" : ""}`; st.className = "dirty"; }
+  else if (!st.className.includes("bad")) { st.textContent = st.dataset.done || ""; st.className = ""; }
+}
+const make = (tag, props = {}, parent) => { const e = Object.assign(document.createElement(tag), props); if (parent) parent.appendChild(e); return e; };
+const fieldRow = (parent, label) => { const r = make("div", { className: "field" }, parent); make("label", { textContent: label, title: label }, r); return r; };
+
+function cueRow(i, cue) {
+  const path = `cues[${i}].beat`, r = fieldRow($("twCues"), cue.name);
+  const beat = make("input", { type: "number", step: "0.0625", value: String(valueOf("timeline", path)), ariaLabel: `${cue.name} beat` }, r);
+  const set = (v) => { beat.value = String(v); beat.dispatchEvent(new Event("input")); };
+  const nudge = (d) => set(Math.round((Number(beat.value) + d) * 16) / 16);
+  make("button", { type: "button", textContent: "−", title: "1/16 beat earlier" }, r).addEventListener("click", () => nudge(-0.0625));
+  make("button", { type: "button", textContent: "+", title: "1/16 beat later" }, r).addEventListener("click", () => nudge(0.0625));
+  const hit = make("input", { type: "checkbox", checked: valueOf("timeline", `cues[${i}].hit`) === true, title: "hit: sync-checked by qa.py", ariaLabel: `${cue.name} hit` }, r);
+  make("button", { type: "button", textContent: "Jump", title: "go to this cue" }, r).addEventListener("click", () => { pause(); seek(snap(beatTime(Number(beat.value)))); });
+  beat.addEventListener("input", () => { const v = beat.value === "" ? NaN : Number(beat.value); beat.classList.toggle("invalid", !beatOk(v)); edit("timeline", path, v, beatOk(v)); });
+  hit.addEventListener("change", () => edit("timeline", `cues[${i}].hit`, hit.checked, true, false)); // a cue without `hit` is a cue with hit off
+}
+
+function colorRow(role) {
+  const path = `colors.${role}`, r = fieldRow($("twColors"), role), v = valueOf("brand", path);
+  const pick = make("input", { type: "color", value: HEX.test(v) ? hex6(v) : "#000000", ariaLabel: `${role} colour` }, r);
+  const txt = make("input", { type: "text", value: v, maxLength: 7, spellcheck: false, ariaLabel: `${role} hex` }, r);
+  pick.addEventListener("input", () => { txt.value = pick.value; txt.classList.remove("invalid"); edit("brand", path, pick.value); });
+  txt.addEventListener("input", () => { const ok = HEX.test(txt.value); txt.classList.toggle("invalid", !ok); if (ok) pick.value = hex6(txt.value); edit("brand", path, txt.value, ok); });
+}
+
+// One editor per leaf of a copy value: a text box for a string, a number box for a weight, a group for an array.
+function copyEditor(parent, value, onChange, label) {
+  if (Array.isArray(value)) {
+    const g = make("div", { className: "group" }, parent);
+    let cur = value.slice();
+    value.forEach((v, i) => copyEditor(g, v, (nv, ok = true) => { if (ok) { cur = cur.slice(); cur[i] = nv; } onChange(cur, ok); }, `${label}[${i}]`));
+  } else if (typeof value === "number") {
+    const n = make("input", { type: "number", min: "1", max: "1000", step: "1", value: String(value), ariaLabel: `${label} weight` }, parent);
+    n.addEventListener("input", () => { const ok = n.value !== "" && Number(n.value) >= 1 && Number(n.value) <= 1000; n.classList.toggle("invalid", !ok); onChange(ok ? Number(n.value) : undefined, ok); });
+  } else {
+    const t = make("input", { type: "text", value: String(value ?? ""), maxLength: 500, ariaLabel: label }, parent);
+    t.addEventListener("input", () => onChange(t.value));
+  }
+}
+function copyRow(key) {
+  const path = `copy.${key}`, r = fieldRow($("twCopy"), key);
+  copyEditor(r, valueOf("brand", path), (v, ok = true) => edit("brand", path, v, ok), key);
+}
+
+function renderTweak() {
+  if (!T.base) return;
+  for (const id of ["twCues", "twColors", "twBrand", "twCopy"]) $(id).replaceChildren();
+  T.base.timeline.cues.forEach((c, i) => cueRow(i, c));
+  for (const role of Object.keys(T.base.brand.colors ?? {})) colorRow(role);
+  for (const key of ["name", "wordmark"]) {
+    const r = fieldRow($("twBrand"), key), t = make("input", { type: "text", value: valueOf("brand", key) ?? "", maxLength: 100, ariaLabel: key }, r);
+    t.addEventListener("input", () => { const ok = t.value.length > 0; t.classList.toggle("invalid", !ok); edit("brand", key, t.value, ok); });
+  }
+  for (const key of Object.keys(T.base.brand.copy ?? {})) copyRow(key);
+  syncTweak();
+}
+function setProject(project) {
+  const before = JSON.stringify(T.base);
+  T.base = { timeline: project.timeline, brand: project.brand };
+  for (const [k, e] of [...T.edits]) if (same(e.value, getPath(T.base[e.file], e.path))) T.edits.delete(k); // an outside edit made it moot
+  if (before !== JSON.stringify(T.base) || !T.rendered) { T.rendered = true; renderTweak(); } // a reload for another reason must not steal focus mid-typing
+  syncTweak();
+}
+
+async function saveTweak() {
+  const byFile = { timeline: [], brand: [] };
+  for (const e of T.edits.values()) byFile[e.file].push({ path: e.path, value: e.value });
+  $("tweakSave").disabled = true;
+  try {
+    for (const file of ["timeline", "brand"]) {
+      if (!byFile[file].length) continue;
+      await api("POST", "/api/tweak", { file, ops: byFile[file] });
+      for (const [k, e] of [...T.edits]) if (e.file === file) T.edits.delete(k); // saved: the reload brings the new base
+    }
+    $("tweakStatus").dataset.done = "saved";
+    $("tweakStatus").className = "";
+    T.rendered = false; // the inputs must show what the files now hold
+    setProject(await fetchProject());
+  } catch (e) {
+    $("tweakStatus").textContent = e.message;
+    $("tweakStatus").className = "bad";
+    syncTweak();
+    return;
+  }
+  syncTweak();
+}
+$("tweakSave").addEventListener("click", saveTweak);
+$("tweakRevert").addEventListener("click", async () => {
+  T.edits.clear(); T.invalid.clear();
+  $("tweakStatus").className = ""; $("tweakStatus").dataset.done = "reverted";
+  T.rendered = false;
+  try { setProject(await fetchProject()); } catch (e) { $("tweakStatus").textContent = e.message; }
+  syncTweak();
+});
+function showTab(name) {
+  for (const [tab, panel, id] of [["tabNotes", "notesPanel", "notes"], ["tabTweak", "tweakPanel", "tweak"]]) {
+    $(tab).setAttribute("aria-pressed", String(id === name));
+    $(panel).hidden = id !== name;
+  }
+}
+$("tabNotes").addEventListener("click", () => showTab("notes"));
+$("tabTweak").addEventListener("click", () => showTab("tweak"));
+window.addEventListener("beforeunload", (e) => { if (T.edits.size) e.preventDefault(); });
+
 // ------------------------------------------------------------------ server events ----
 async function fetchProject() {
   const r = await fetch("/api/project", { cache: "no-store" });
@@ -601,7 +762,9 @@ function applyQuery() {
 // opened onto an unreadable project recovers by itself once the file is fixed.
 async function reload() {
   try {
-    applyTimeline((await fetchProject()).timeline);
+    const project = await fetchProject();
+    applyTimeline(project.timeline);
+    setProject(project);
     applyQuery();
     syncButtons();
   } catch (e) {
@@ -653,6 +816,7 @@ window.__studio = {
   get audioClock() { return !!(S.playing && S.clock?.audio); },
   get audioState() { return S.ctx ? S.ctx.state : null; },
   get notes() { return S.notes; },
+  get tweaks() { return [...T.edits.values()]; },
   get draft() { return S.draft; },
   seek, play, pause,
 };

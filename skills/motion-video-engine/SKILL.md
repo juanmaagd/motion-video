@@ -27,7 +27,7 @@ Loaded by `motion-video` when the project is assembled and while scenes are writ
 ## Execution Steps
 
 1. Work only in the assembled project, never in a skill folder.
-2. Set fps, size, duration, bpm and the cues in `timeline.json` from the approved storyboard.
+2. Set fps, size, duration, bpm and the cues in `timeline.json` from the approved storyboard. The person may nudge cue beats and edit brand colours, copy, name and wordmark in the studio's Tweak tab, which rewrites `timeline.json` and `brand.json`: re-read them before editing and never overwrite them blindly.
 3. Replace the demo scenes in `index.html` bar by bar, each scene `{ init(app), render(t) }` (`references/scene-recipes.md`, `references/motion-craft.md`).
 4. Check the moment being worked on live with `npm run studio` (scrub, play with the score; every save reloads and a syntax error shows its file and line at once; `?t=3.5&loop=2:4` opens a moment), or as stills: `node render.mjs stills --times=1.2,1.9 --scale=0.5`; the whole piece with `npm run stills`; a transition with `--strip=1.80:12 --out=out/strip`. A person reviewing in the studio clicks the frame to leave notes in `feedback.json` (time, scene, element, point). Read it fresh, work the open notes by `t`, render stills at each `t` (a `--strip` for motion), fix, then set `status` to `resolved` or `wontfix` with a one-line `resolution`: edit the file or `PATCH /api/feedback/<id>`. It is a working file; keep it out of git.
 5. `npm run preview` (1 sample, half size), then `npm run build` (32 samples, full size; QA runs inside it). Budget: about 13 s of wall time per rendered second of 1080p60 on 8 workers.

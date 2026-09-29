@@ -26,6 +26,9 @@
 // against feedback.json, the review's working file. The server builds each note itself from what the page
 // sends (id, createdAt, frame and the status are its own) and refuses anything malformed with a 400 and no write.
 //
+// Tweaks (the page's Tweak tab): POST /api/tweak {file: "timeline"|"brand", ops: [{path, value}]} changes a short
+// allowlist of fields in timeline.json or brand.json (see applyTweak). One bad op refuses the whole request.
+//
 // Writes are guarded (see readJSONBody): a JSON POST with the per-run token, the studio's own Origin
 // and an allowed Host. Every request, reads included, must carry an allowed Host, which is what stops
 // DNS rebinding from reading the page (and its token) through a hostile name that points at 127.0.0.1.
@@ -34,6 +37,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createStaticHandler, listen } from "./serve.mjs";
 
@@ -60,6 +64,20 @@ async function readJSON(file, fallback) {
   try { return JSON.parse(text); } catch (e) { throw new Error(`${path.basename(file)} is not valid JSON: ${e.message}`); }
 }
 
+// JSON in the layout the project files already use: an object or array goes on one line when it fits in
+// `width` columns ({ "name": "open", "beat": 1 } and [1, 2]), and is broken over lines when it does not. A file
+// written this way keeps its cue lines and its short objects, so a tweak does not rewrite a whole file.
+export function formatJSON(value, width = 100, indent = 0) {
+  const pad = (n) => " ".repeat(n);
+  const inline = (v) => (Array.isArray(v) ? (v.length ? `[${v.map(inline).join(", ")}]` : "[]")
+    : v !== null && typeof v === "object" ? (Object.keys(v).length ? `{ ${Object.entries(v).map(([k, x]) => `${JSON.stringify(k)}: ${inline(x)}`).join(", ")} }` : "{}")
+      : JSON.stringify(v));
+  const one = inline(value);
+  if (one.length <= width - indent || value === null || typeof value !== "object") return one;
+  if (Array.isArray(value)) return `[\n${value.map((x) => pad(indent + 2) + formatJSON(x, width, indent + 2)).join(",\n")}\n${pad(indent)}]`;
+  return `{\n${Object.entries(value).map(([k, x]) => `${pad(indent + 2)}${JSON.stringify(k)}: ${formatJSON(x, width, indent + 2)}`).join(",\n")}\n${pad(indent)}}`;
+}
+
 // One writer at a time. Every update re-reads the file from disk inside the lock, so an edit made by
 // a person or the agent between two calls is never overwritten with a stale copy.
 let writeChain = Promise.resolve();
@@ -75,7 +93,7 @@ export function updateJSON(file, mutate, fallback) {
     if (next === undefined) return current;
     const tmp = `${file}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
     try {
-      await fs.promises.writeFile(tmp, JSON.stringify(next, null, 2) + "\n");
+      await fs.promises.writeFile(tmp, formatJSON(next) + "\n");
       await fs.promises.rename(tmp, file);
     } catch (e) {
       await fs.promises.rm(tmp, { force: true });
@@ -235,6 +253,64 @@ const emptyFeedback = () => ({ version: 1, notes: [] });
 function nextId(notes) {
   const used = notes.map((n) => /^n(\d+)$/.exec(n?.id)?.[1]).filter(Boolean).map(Number);
   return `n${Math.max(0, ...used) + 1}`;
+}
+
+// ------------------------------------------------------------------------ tweaks ----
+
+const HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const CUE_PATH = /^cues\[(0|[1-9]\d*)\]\.(beat|hit)$/, COLOR_PATH = /^colors\.([A-Za-z][A-Za-z0-9_-]{0,31})$/, COPY_PATH = /^copy\.([A-Za-z][A-Za-z0-9_-]{0,31})$/;
+const clean = (v, what, max = 500, min = 0) => { text(v, what, max, min); need(!/[\u0000-\u001f\u007f]/.test(v), `${what} must not contain control characters`); return v; };
+
+// True when `next` has the shape of `current`: a string for a string, a finite number (a font weight) for a
+// number, and for an array the same length with every element matching. Values are then checked as they go.
+function sameShape(current, next, what) {
+  if (typeof current === "string") { clean(next, what); return true; }
+  if (typeof current === "number") { need(typeof next === "number" && Number.isFinite(next) && next >= 1 && next <= 1000, `${what} must be a number from 1 to 1000`); return true; }
+  if (Array.isArray(current)) {
+    need(Array.isArray(next) && next.length === current.length, `${what} must be an array of ${current.length}`);
+    current.forEach((c, i) => sameShape(c, next[i], `${what}[${i}]`));
+    return true;
+  }
+  throw new BadRequest(`${what} cannot be changed`);
+}
+
+// The fields the studio may change, and nothing else. Anything outside this list is refused, so a page (or a
+// script that stole the token) cannot rewrite a cue's name, the bpm, the duration, the fonts or the logo.
+//   timeline.json: cues[i].beat (a number that puts the cue inside the video), cues[i].hit (a boolean)
+//   brand.json:    colors.<role> (#rgb or #rrggbb), copy.<key> (same shape as now), wordmark, name
+// `doc` is the file as it is now; the result is a new document, or an error and nothing written. All or none.
+export function applyTweak(file, doc, ops) {
+  need(isObj(doc), `${file}.json is not a JSON object`);
+  need(Array.isArray(ops) && ops.length >= 1 && ops.length <= 200, "ops must be a list of 1 to 200 changes");
+  const next = structuredClone(doc);
+  for (const op of ops) {
+    need(isObj(op) && Object.keys(op).length === 2 && typeof op.path === "string" && "value" in op, "each op is { path, value }");
+    const { path: p, value } = op;
+    let m;
+    if (file === "timeline" && (m = CUE_PATH.exec(p))) {
+      need(Array.isArray(next.cues) && isObj(next.cues[Number(m[1])]), `${p}: there is no such cue`);
+      if (m[2] === "hit") need(typeof value === "boolean", `${p} must be true or false`);
+      else {
+        finite(value, p);
+        const at = (next.offset ?? 0) + (value - 1) * (60 / next.bpm);
+        need(at >= -1e-9 && at <= next.duration + 1e-9, `${p}: beat ${value} falls outside the video (0..${next.duration} s)`);
+      }
+      next.cues[Number(m[1])][m[2]] = value;
+    } else if (file === "brand" && (m = COLOR_PATH.exec(p))) {
+      need(typeof value === "string" && HEX.test(value), `${p} must be a #rgb or #rrggbb colour`);
+      if (!isObj(next.colors)) next.colors = {};
+      next.colors[m[1]] = value;
+    } else if (file === "brand" && (m = COPY_PATH.exec(p))) {
+      need(isObj(next.copy) && Object.hasOwn(next.copy, m[1]), `${p}: there is no such copy field to change`);
+      sameShape(next.copy[m[1]], value, p);
+      next.copy[m[1]] = value;
+    } else if (file === "brand" && (p === "wordmark" || p === "name")) {
+      next[p] = clean(value, p, 100, 1);
+    } else {
+      throw new BadRequest(`${p}: not a field the studio may change in ${file}.json`);
+    }
+  }
+  return next;
 }
 
 // ------------------------------------------------------------------- the server ----
@@ -459,6 +535,24 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
     if (pathname === "/api/ping") {
       if ((await readJSONBody(req, res)) === null) return;
       return send(res, 200, { ok: true });
+    }
+
+    if (pathname === "/api/tweak") {
+      const body = await readJSONBody(req, res);
+      if (body === null) return;
+      try {
+        need(isObj(body) && Object.keys(body).every((k) => k === "file" || k === "ops"), "the body is { file, ops }");
+        need(body.file === "timeline" || body.file === "brand", 'file must be "timeline" or "brand"');
+        let changed = false;
+        const doc = await updateJSON(file(`${body.file}.json`), (d) => {
+          const next = applyTweak(body.file, d, body.ops);
+          changed = !isDeepStrictEqual(next, d);
+          return changed ? next : undefined; // nothing actually changes: no write, so no reload
+        }, body.file === "brand" ? {} : undefined);
+        return send(res, 200, { ok: true, file: body.file, changed, doc });
+      } catch (e) {
+        return send(res, e instanceof BadRequest ? 400 : 500, { error: e.code === "ENOENT" ? `${body.file}.json does not exist` : e.message });
+      }
     }
 
     if (pathname === "/api/feedback") {

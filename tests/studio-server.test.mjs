@@ -21,7 +21,7 @@ fs.writeFileSync(path.join(base, "proj-secret/x.txt"), "TOP-SECRET-OUTSIDE-THE-R
 fs.symlinkSync(path.join(base, "proj-secret"), path.join(root, "escape"), "dir");
 fs.writeFileSync(path.join(root, ".secret"), "dotfile");
 const mod = await import(pathToFileURL(path.join(root, "studio.mjs")).href);
-const { startStudio, updateJSON, isIgnored } = mod;
+const { startStudio, updateJSON, isIgnored, formatJSON, applyTweak } = mod;
 
 let studio, port, events;
 before(async () => {
@@ -520,6 +520,130 @@ test("PATCH on an id when there is no feedback.json is a 404 and does not create
     assert.equal(r.status, 404);
     assert.ok(!fs.existsSync(path.join(dir, "feedback.json")));
   });
+});
+
+// ---- tweaks ----
+const tweak = (file, ops, over = {}) => request(port, at({ rest: { path: "/api/tweak", body: typeof file === "string" && ops === undefined ? file : JSON.stringify({ file, ops }), ...over } }));
+const timelineFile = () => path.join(root, "timeline.json");
+const brandFile = () => path.join(root, "brand.json");
+
+test("formatJSON keeps the layout of the project files: timeline.json round-trips byte for byte", () => {
+  const original = fs.readFileSync(path.join(ENGINE, "timeline.json"), "utf8");
+  assert.equal(formatJSON(JSON.parse(original)) + "\n", original, "cue lines and the inline lagThreshold are kept");
+  assert.equal(formatJSON({ a: [1, 2], b: {}, c: [], d: { e: "x" } }), '{ "a": [1, 2], "b": {}, "c": [], "d": { "e": "x" } }');
+  assert.equal(formatJSON({ list: Array.from({ length: 30 }, (_, i) => `item number ${i}`) }).split("\n").length, 34, "what does not fit is broken over lines");
+});
+
+test("an allowed timeline op changes only that number, reloads, and regenerates the audio", async () => {
+  const original = fs.readFileSync(timelineFile(), "utf8");
+  const mark = events.mark();
+  const r = await tweak("timeline", [{ path: "cues[1].beat", value: 2.25 }]);
+  assert.equal(r.status, 200);
+  const body = JSON.parse(r.body);
+  assert.deepEqual([body.ok, body.file, body.changed, body.doc.cues[1].beat], [true, "timeline", true, 2.25]);
+  assert.equal(fs.readFileSync(timelineFile(), "utf8"), original.replace('"name": "word1", "beat": 2 }', '"name": "word1", "beat": 2.25 }'), "one number differs; every other byte is as it was");
+  await events.wait("reload", { after: mark, timeout: 2000 });
+  await events.wait("audio-stale", { after: mark, timeout: 2000 });
+  await events.wait("audio-ready", { after: mark, timeout: 15000 });
+  // setting it back restores the file exactly; a later op on the same path wins within one request
+  assert.equal((await tweak("timeline", [{ path: "cues[1].beat", value: 2.75 }, { path: "cues[1].beat", value: 2 }])).status, 200);
+  assert.equal(fs.readFileSync(timelineFile(), "utf8"), original);
+  const hit = await tweak("timeline", [{ path: "cues[0].hit", value: true }]);
+  assert.equal(hit.status, 200);
+  assert.match(fs.readFileSync(timelineFile(), "utf8"), /\{ "name": "open", "beat": 1, "hit": true \}/);
+  fs.writeFileSync(timelineFile(), original);
+  await events.wait("audio-ready", { after: events.mark() - 1, timeout: 15000 }).catch(() => {});
+  await sleep(800);
+});
+
+test("allowed brand ops: colour, copy (same shape), wordmark and name", async () => {
+  const original = fs.readFileSync(brandFile(), "utf8");
+  const mark = events.mark();
+  const r = await tweak("brand", [
+    { path: "colors.accent", value: "#ff0055" }, { path: "colors.bg", value: "#f05" },
+    { path: "copy.caption", value: "A new caption" }, { path: "copy.features", value: ["One", "Two", "Three"] },
+    { path: "copy.headline", value: [["Fast", 300], ["from", 400], ["pure", 700], ["code.", 600]] },
+    { path: "wordmark", value: "acme" }, { path: "name", value: "Acme (fictional)" },
+  ]);
+  assert.equal(r.status, 200, r.body.toString());
+  const doc = JSON.parse(fs.readFileSync(brandFile(), "utf8"));
+  assert.deepEqual([doc.colors.accent, doc.colors.bg, doc.colors.ink], ["#ff0055", "#f05", "#0b0d12"]);
+  assert.deepEqual([doc.copy.caption, doc.copy.features, doc.copy.headline[0], doc.wordmark, doc.name], ["A new caption", ["One", "Two", "Three"], ["Fast", 300], "acme", "Acme (fictional)"]);
+  assert.deepEqual(doc.fonts, JSON.parse(original).fonts, "fonts are untouched");
+  assert.equal(doc.logo, JSON.parse(original).logo);
+  await events.wait("reload", { after: mark, timeout: 2000 });
+  await sleep(300);
+  assert.equal(events.count("audio-stale", mark), 0, "brand edits do not regenerate the audio");
+  fs.writeFileSync(brandFile(), original);
+  await sleep(500);
+});
+
+test("a tweak that changes nothing writes nothing", async () => {
+  const before = fs.readFileSync(timelineFile());
+  const mark = events.mark();
+  const r = await tweak("timeline", [{ path: "cues[0].beat", value: 1 }]);
+  assert.equal(r.status, 200);
+  assert.equal(JSON.parse(r.body).changed, false);
+  await sleep(600);
+  assert.ok(fs.readFileSync(timelineFile()).equals(before));
+  assert.equal(events.count("reload", mark), 0, "and so nothing reloads");
+});
+
+test("every op outside the allowlist, or with the wrong type or shape, is a 400 that leaves both files byte-identical", async () => {
+  const beforeT = fs.readFileSync(timelineFile()), beforeB = fs.readFileSync(brandFile());
+  const t = (path_, value) => ["timeline", [{ path: path_, value }]], b = (path_, value) => ["brand", [{ path: path_, value }]];
+  const bad = {
+    "a cue name": t("cues[0].name", "renamed"), "bpm": t("bpm", 90), "duration": t("duration", 60), "offset": t("offset", 1), "fps": t("fps", 30), "width": t("width", 100),
+    "title": t("title", "x"), "a QA threshold": t("lagThreshold.full", 9), "loudness": t("loudness", -20), "the cues array": t("cues", []),
+    "a cue that does not exist": t("cues[99].beat", 2), "a cue index with a leading zero": t("cues[01].beat", 2), "a negative cue index": t("cues[-1].beat", 2),
+    "beat as a string": t("cues[1].beat", "2"), "beat null": t("cues[1].beat", null), "beat infinite": ["timeline", "PLACEHOLDER"],
+    "beat before the video": t("cues[1].beat", -5), "beat after the video": t("cues[1].beat", 100), "hit as a string": t("cues[0].hit", "yes"), "hit as a number": t("cues[0].hit", 1),
+    "a path below a leaf": t("cues[1].beat.x", 2), "a colour in the timeline": t("colors.accent", "#fff"), "a beat in the brand": b("cues[0].beat", 2),
+    "a bad colour word": b("colors.accent", "red"), "a colour too short": b("colors.accent", "#12"), "a colour that is not hex": b("colors.accent", "#GGGGGG"),
+    "a 7-digit colour": b("colors.accent", "#1234567"), "an 8-digit colour": b("colors.accent", "#ff005500"), "a colour with a space": b("colors.accent", "#ff0055 "), "a colour as a number": b("colors.accent", 255),
+    "a whole colours object": b("colors", { bg: "#fff" }), "a role name with a dot": b("colors.a.b", "#fff"),
+    "copy of the wrong type": b("copy.caption", 5), "copy array of the wrong length": b("copy.features", ["a", "b"]), "copy array with a number in it": b("copy.features", ["a", "b", 3]),
+    "copy string where an array is": b("copy.features", "a, b, c"), "a headline pair of the wrong shape": b("copy.headline", [["Fast"], ["from", 400], ["pure", 600], ["code.", 600]]),
+    "a weight of 0": b("copy.headline", [["Fast", 0], ["from", 400], ["pure", 600], ["code.", 600]]), "a weight as a string": b("copy.headline", [["Fast", "400"], ["from", 400], ["pure", 600], ["code.", 600]]),
+    "a copy field that does not exist": b("copy.nope", "x"), "copy with a newline": b("copy.caption", "two\nlines"), "copy over 500 characters": b("copy.caption", "x".repeat(501)),
+    "copy inherited from Object": b("copy.constructor", "x"), "the fonts": b("fonts.display.family", "Comic"), "the logo": b("logo", "brand/other.svg"), "colorProbes": b("colorProbes", []),
+    "the note": b("note", "x"), "an empty wordmark": b("wordmark", ""), "a wordmark that is a number": b("wordmark", 5), "a name over 100": b("name", "n".repeat(101)),
+    "a proto path": b("__proto__.x", 1), "a proto colour": b("colors.__proto__", "#fff"),
+    "a mixed batch, legal first": ["brand", [{ path: "colors.accent", value: "#ff0055" }, { path: "logo", value: "x" }]],
+    "a mixed batch, illegal first": ["brand", [{ path: "fonts", value: {} }, { path: "colors.accent", value: "#ff0055" }]],
+    "a mixed timeline batch": ["timeline", [{ path: "cues[1].beat", value: 2.5 }, { path: "cues[1].name", value: "x" }, { path: "cues[2].beat", value: 2.75 }]],
+    "no ops": ["timeline", []], "ops not an array": ["timeline", { path: "cues[1].beat", value: 2 }], "an op without a value": ["timeline", [{ path: "cues[1].beat" }]],
+    "an op with an extra key": ["timeline", [{ path: "cues[1].beat", value: 2, force: true }]], "201 ops": ["timeline", Array.from({ length: 201 }, () => ({ path: "cues[1].beat", value: 2 }))],
+    "another file": ["package", [{ path: "name", value: "x" }]], "the score": ["score", [{ path: "x", value: 1 }]], "no file": [undefined, [{ path: "name", value: "x" }]],
+  };
+  for (const [name, [file, ops]] of Object.entries(bad)) {
+    const raw = ops === "PLACEHOLDER" ? '{"file":"timeline","ops":[{"path":"cues[1].beat","value":1e999}]}' : undefined;
+    const r = raw ? await tweak(raw) : await tweak(file, ops);
+    assert.equal(r.status, 400, `${name}: ${r.status} ${r.body}`);
+    assert.ok(fs.readFileSync(timelineFile()).equals(beforeT) && fs.readFileSync(brandFile()).equals(beforeB), `${name} changed a file`);
+  }
+  assert.equal((await tweak('{"file":"timeline","ops":[],"extra":1}')).status, 400);
+  assert.equal((await tweak("[1]")).status, 400);
+  assert.equal((await tweak("{nope")).status, 400);
+});
+
+test("the guard covers /api/tweak, and only POST is answered", async () => {
+  const before = fs.readFileSync(timelineFile());
+  const body = JSON.stringify({ file: "timeline", ops: [{ path: "cues[1].beat", value: 2.5 }] });
+  for (const bad of [{ "x-studio-token": undefined }, { "x-studio-token": "0".repeat(32) }, { origin: "http://attacker.example" }, { "content-type": "text/plain" }]) {
+    const headers = Object.fromEntries(Object.entries({ ...at().headers, ...bad }).filter(([, v]) => v !== undefined));
+    assert.ok([403, 415].includes((await request(port, { method: "POST", path: "/api/tweak", body, headers })).status));
+  }
+  for (const method of ["GET", "PUT", "PATCH", "DELETE"]) assert.equal((await request(port, { ...at({ rest: { method, path: "/api/tweak", body } }) })).status, 405, method);
+  assert.ok(fs.readFileSync(timelineFile()).equals(before));
+});
+
+test("applyTweak is all or nothing and never mutates its input", () => {
+  const doc = { bpm: 128, offset: 0, duration: 7.5, cues: [{ name: "a", beat: 1 }, { name: "b", beat: 2 }] };
+  const copy = structuredClone(doc);
+  assert.deepEqual(applyTweak("timeline", doc, [{ path: "cues[1].beat", value: 3 }]).cues[1].beat, 3);
+  assert.throws(() => applyTweak("timeline", doc, [{ path: "cues[0].beat", value: 4 }, { path: "bpm", value: 1 }]), /not a field the studio may change/);
+  assert.deepEqual(doc, copy);
 });
 
 // ---- audio regeneration, with a stub score so the timing is under the test's control ----
