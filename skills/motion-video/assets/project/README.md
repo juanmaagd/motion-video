@@ -46,6 +46,7 @@ on `PATH` (`codex --version`) and is entirely optional -- most videos need no ge
 | `archive.sh` | no | snapshot outputs + source (sans `node_modules`) into `vN/` before a revision. |
 | `determinism.mjs` | no | forward vs reversed frame-order capture must be pixel-identical. |
 | `serve.mjs` | no | the static file server behind `render.mjs` and `determinism.mjs`: GET/HEAD only, contained to this folder by real path (no `..`, no symlink out), no dotfiles or `node_modules`. |
+| `feedback.json` | working file | the review notes made by clicking the frame in the studio (`npm run studio`): time, scene, element, point and text per note, each `open`, `resolved` or `wontfix` with a one-line `resolution`. Created on the first note. Keep it out of git; `archive.sh` copies it into `vN/src/`. |
 | `studio.mjs`, `studio.html` | no | the live preview: a 127.0.0.1-only server (per-run token, Host and Origin checks on every write) that watches this folder, pushes reloads over server-sent events and regenerates the audio from `score.mjs`, and the page it serves. |
 | `gen-image.mjs` | no | optional: one raster plate/texture via the Codex CLI's own built-in image tool, no fallback; records `generated/manifest.json`. |
 | `generated/` | maybe | `manifest.json` (empty by default) + any files `gen-image.mjs` writes. |

@@ -13,9 +13,14 @@
 //   audio-stale                   the audio is being regenerated (sent at start, and again on each edit)
 //   audio-ready {url, mtime}      out/studio-audio.wav is fresh (also sent to a page that connects later)
 //   audio-error {message}         score.mjs failed or is missing; the last good WAV, if any, stays served
+//   feedback-changed              feedback.json changed (the studio's own write, the agent's, or a hand edit)
 // Audio comes from `node score.mjs --out=out/.studio-audio.wav.tmp`, renamed onto
 // out/studio-audio.wav when it succeeds (build.mjs writes and deletes a WAV of its own, so the
 // studio makes its own).
+//
+// Notes (click the frame in the page): GET /api/feedback, POST /api/feedback, PATCH /api/feedback/:id, all
+// against feedback.json, the review's working file. The server builds each note itself from what the page
+// sends (id, createdAt, frame and the status are its own) and refuses anything malformed with a 400 and no write.
 //
 // Writes are guarded (see readJSONBody): a JSON POST with the per-run token, the studio's own Origin
 // and an allowed Host. Every request, reads included, must carry an allowed Host, which is what stops
@@ -89,6 +94,78 @@ export function isIgnored(rel) {
   return /\.(tmp|swp)$/.test(name) || name.endsWith("~");                          // atomic-write and editor temp files
 }
 
+// ------------------------------------------------------------------- feedback notes ----
+
+export class BadRequest extends Error {}
+const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const need = (cond, msg) => { if (!cond) throw new BadRequest(msg); };
+const finite = (v, what) => { need(typeof v === "number" && Number.isFinite(v), `${what} must be a finite number`); return v; };
+const int = (v, what) => { need(Number.isInteger(v) && v >= 0, `${what} must be a non-negative integer`); return v; };
+const text = (v, what, max, min = 0) => { need(typeof v === "string" && v.length >= min && v.length <= max, `${what} must be a string of ${min}..${max} characters`); return v; };
+const STATUSES = ["open", "resolved", "wontfix"];
+
+// Builds a note from the page's request body: only known fields survive, and the server fills in the
+// rest. `tl` is the current timeline.json (the duration and size the request is checked against).
+export function buildNote(body, tl) {
+  need(isObj(body), "the body must be a JSON object");
+  const t = finite(body.t, "t");
+  need(t >= 0 && t <= tl.duration, `t must be within 0..${tl.duration}`);
+  const note = { t, frame: Math.round(t * tl.fps) };
+
+  need(isObj(body.point) && isObj(body.point.stage), "point and point.stage are required");
+  const x = finite(body.point.x, "point.x"), y = finite(body.point.y, "point.y");
+  need(x >= 0 && x <= tl.width && y >= 0 && y <= tl.height, "point must lie inside the frame");
+  const sx = finite(body.point.stage.x, "point.stage.x"), sy = finite(body.point.stage.y, "point.stage.y");
+  need(Math.abs(sx) < 1e6 && Math.abs(sy) < 1e6, "point.stage is out of range");
+  note.point = { x, y, stage: { x: sx, y: sy } };
+
+  const c = body.context;
+  need(isObj(c), "context is required");
+  const named = (v, what, extra) => (v == null ? null : (need(isObj(v), `${what} must be an object or null`), { name: text(v.name, `${what}.name`, 200), ...extra(v) }));
+  note.context = {
+    bar: int(c.bar, "context.bar"), beat: int(c.beat, "context.beat"),
+    cue: named(c.cue, "context.cue", (v) => ({ t: finite(v.t, "context.cue.t") })),
+    next: named(c.next, "context.next", (v) => ({ in: finite(v.in, "context.next.in") })),
+    scene: named(c.scene, "context.scene", (v) => ({ index: int(v.index, "context.scene.index") })),
+  };
+  // key order matches the documented schema: scene = { index, name }
+  if (note.context.scene) note.context.scene = { index: note.context.scene.index, name: note.context.scene.name };
+
+  const g = body.target;
+  if (g == null) note.target = null;
+  else {
+    need(isObj(g) && isObj(g.rect), "target must be an object with a rect, or null");
+    note.target = {
+      tag: text(g.tag, "target.tag", 32, 1), class: text(g.class ?? "", "target.class", 200), text: text(g.text ?? "", "target.text", 80),
+      rect: { x: finite(g.rect.x, "target.rect.x"), y: finite(g.rect.y, "target.rect.y"), w: finite(g.rect.w, "target.rect.w"), h: finite(g.rect.h, "target.rect.h") },
+      path: text(g.path ?? "", "target.path", 400),
+    };
+  }
+  note.text = text(typeof body.text === "string" ? body.text.trim() : body.text, "text", 2000, 1);
+  return note;
+}
+
+// The body of PATCH /api/feedback/:id: a status, and the one-line resolution that goes with it.
+export function buildPatch(body) {
+  need(isObj(body), "the body must be a JSON object");
+  need(Object.keys(body).every((k) => k === "status" || k === "resolution"), "only status and resolution can be set");
+  need(STATUSES.includes(body.status), `status must be one of ${STATUSES.join(", ")}`);
+  const resolution = body.resolution == null ? null : text(body.resolution, "resolution", 500);
+  return { status: body.status, resolution: resolution === "" ? null : resolution };
+}
+
+// feedback.json must be the v1 shape before the server appends to it; anything else is left untouched.
+function checkFeedback(doc) {
+  if (!isObj(doc) || doc.version !== 1 || !Array.isArray(doc.notes)) throw new Error("feedback.json is not a version 1 feedback file, so it was left alone");
+  return doc;
+}
+const emptyFeedback = () => ({ version: 1, notes: [] });
+// n1, n2, ...: short enough to say aloud ("fix n3"), unique because it is computed inside the write lock.
+function nextId(notes) {
+  const used = notes.map((n) => /^n(\d+)$/.exec(n?.id)?.[1]).filter(Boolean).map(Number);
+  return `n${Math.max(0, ...used) + 1}`;
+}
+
 // ------------------------------------------------------------------- the server ----
 
 const send = (res, status, body, headers = {}) => {
@@ -125,8 +202,8 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
 
   // The guard for every mutating endpoint. Answers the request itself and returns null when it
   // refuses; otherwise the parsed JSON body. Nothing is written before all of it has passed.
-  async function readJSONBody(req, res) {
-    if (req.method !== "POST") { send(res, 405, { error: "POST only" }, { allow: "POST" }); return null; }
+  async function readJSONBody(req, res, method = "POST") {
+    if (req.method !== method) { send(res, 405, { error: `${method} only` }, { allow: method }); return null; }
     const type = (req.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
     if (type !== "application/json") { send(res, 415, { error: "content-type must be application/json" }); return null; }
     // Origin is mandatory here (a browser sends it on every cross-origin POST, and on same-origin ones).
@@ -226,8 +303,14 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
   // ---- watcher: any source change reloads; score and timeline changes also regenerate the audio ----
   const changed = [];
   let debounce = null;
+  let feedbackTimer = null;
   const watcher = fs.watch(realRoot, { recursive: true }, (_event, filename) => {
     const rel = filename ? String(filename).split(path.sep).join("/") : "";
+    if (rel === "feedback.json") { // never a reload (the studio writes it itself), but an open notes panel must hear of it
+      clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => broadcast("feedback-changed"), DEBOUNCE_MS);
+      return;
+    }
     if (rel && isIgnored(rel)) return;
     changed.push(rel);
     clearTimeout(debounce);
@@ -287,6 +370,43 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
       return send(res, 200, { ok: true });
     }
 
+    if (pathname === "/api/feedback") {
+      if (req.method === "GET") {
+        try { return send(res, 200, checkFeedback(await readJSON(file("feedback.json"), emptyFeedback))); } catch (e) { return send(res, 500, { error: e.message }); }
+      }
+      const body = await readJSONBody(req, res);
+      if (body === null) return;
+      try {
+        const note = buildNote(body, await readJSON(file("timeline.json")));
+        const doc = await updateJSON(file("feedback.json"), (d) => {
+          checkFeedback(d);
+          return { ...d, notes: [...d.notes, { id: nextId(d.notes), createdAt: new Date().toISOString(), status: "open", ...note, resolution: null }] };
+        }, emptyFeedback);
+        return send(res, 201, { note: doc.notes[doc.notes.length - 1] });
+      } catch (e) {
+        return send(res, e instanceof BadRequest ? 400 : 500, { error: e.message });
+      }
+    }
+
+    const patchId = /^\/api\/feedback\/([A-Za-z0-9_-]{1,64})$/.exec(pathname)?.[1];
+    if (patchId) {
+      const body = await readJSONBody(req, res, "PATCH");
+      if (body === null) return;
+      try {
+        const patch = buildPatch(body);
+        let found = false;
+        const doc = await updateJSON(file("feedback.json"), (d) => {
+          checkFeedback(d);
+          if (!d.notes.some((n) => n?.id === patchId)) return undefined; // nothing to change: leave the file alone
+          found = true;
+          return { ...d, notes: d.notes.map((n) => (n?.id === patchId ? { ...n, ...patch } : n)) };
+        }, emptyFeedback);
+        return found ? send(res, 200, { note: doc.notes.find((n) => n.id === patchId) }) : send(res, 404, { error: `no note ${patchId}` });
+      } catch (e) {
+        return send(res, e instanceof BadRequest ? 400 : 500, { error: e.message });
+      }
+    }
+
     if (pathname.startsWith("/api/")) return send(res, 404, { error: "no such endpoint" });
     return staticHandler(req, res);
   }
@@ -307,6 +427,7 @@ export async function startStudio({ root = ROOT, port, log = (m) => console.log(
     if (closed) return;
     closed = true;
     clearTimeout(debounce);
+    clearTimeout(feedbackTimer);
     clearInterval(heartbeat);
     watcher.close();
     child?.kill("SIGKILL");

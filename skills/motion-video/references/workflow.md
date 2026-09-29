@@ -53,6 +53,7 @@ Extract tokens, fonts, logo and copy into `brand.json`, `fonts/`, `brand/logo.sv
 - `node render.mjs stills --times=1.2,1.9 --scale=0.5` for the moment you are working on (about 30 ms per still at half size).
 - `node render.mjs stills --beats` + `python3 sheet.py out/stills out/beats.png` for the whole piece.
 - `node render.mjs stills --strip=1.80:12 --out=out/strip` for consecutive frames around a transition.
+- `npm run studio` (Chrome or Chromium, `http://127.0.0.1:4321`): the composition live, scrubbable and playable with the score; every save reloads it, a syntax error or a failed load shows as a message over the last good frame, and `score.mjs` / `timeline.json` edits regenerate the sound. The person can click the frame there to leave a note (section 6).
 - Read the PNGs (the Read tool shows images). Half-size sheets at 480 px per thumb are enough to judge composition; open full-size stills to judge type.
 
 ## 5. Score
@@ -66,6 +67,8 @@ Write `score.mjs` from the cues (`sound-design.md` in the `motion-video-sound` s
 ```sh
 npm run preview      # 1 sample, half size: seconds, not minutes
 ```
+
+**Pointed feedback.** When the person reviews in the studio, every click on the frame becomes a note in `feedback.json` (schema v1: `t`, `frame`, `context.bar`/`beat`/`cue`/`scene`, the clicked `target` element with its `path`, `point` in video pixels and the camera-free `stage` point, `text`, `status`, `resolution`). Work it as a loop: read the file fresh each time (notes arrive while you work), take the open notes in `t` order, render stills at each `t` (`node render.mjs stills --times=<t>`, plus `--strip=<t-0.2>:12` for a motion note), fix `index.html`, re-render the same `t`, then mark the note `resolved` (or `wontfix`) with a one-line `resolution` by editing its `status` and `resolution` in the file, or with `PATCH /api/feedback/<id>` (JSON `{status, resolution}`; it needs the run's token, which is in the page served at `/`, sent as `X-Studio-Token` with an `Origin` of the studio's own address). The studio shows the change at once. `feedback.json` is a working file: keep it out of git (a project that is a repo ignores it); `archive.sh` copies it into `vN/src/` as the review record of that version.
 
 Per pass: the beat contact sheet, a 12-frame strip around every transition, full-size stills of every bar, and `python3 lagproof.py out/<slug>-preview.mp4` (must PASS — no run of stepped/frozen frames outside a declared hold). Fix composition, collisions, timing and legibility; then repeat. Check every item of the `pitfalls.md` files (`motion-video-engine`, `-sound`, `-qa`, `-brand`) that applies.
 

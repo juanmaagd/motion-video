@@ -280,6 +280,145 @@ it("the latency offset is remembered between visits", async () => {
   await context.close();
 });
 
+// ------------------------------------------------------------------------- notes ----
+const feedbackFile = path.join(root, "feedback.json");
+const readNotes = () => JSON.parse(fs.readFileSync(feedbackFile, "utf8")).notes;
+const seed = (notes) => fs.writeFileSync(feedbackFile, JSON.stringify({ version: 1, notes }));
+const fakeNote = (id, t, over = {}) => ({
+  id, createdAt: "2026-01-01T00:00:00.000Z", status: "open", t, frame: Math.round(t * 60), point: { x: 400, y: 300, stage: { x: 400, y: 300 } },
+  context: { bar: 1, beat: 1, cue: null, next: null, scene: { index: 1, name: "features" } }, target: { tag: "div", class: "", text: `target ${id}`, rect: { x: 0, y: 0, w: 1, h: 1 }, path: "#stage" },
+  text: `note ${id}`, resolution: null, ...over,
+});
+// The frame-space geometry of the settled "Deterministic frames" row at the current t, plus the camera's matrix.
+const rowGeometry = (page) => page.evaluate(() => {
+  const doc = document.getElementById("comp").contentDocument;
+  const el = [...doc.querySelectorAll("div")].find((d) => d.children.length === 0 && d.textContent === "Deterministic frames");
+  const b = el.getBoundingClientRect(), m = new DOMMatrixReadOnly(doc.defaultView.getComputedStyle(doc.getElementById("stage").firstElementChild).transform);
+  const s = document.getElementById("stack").getBoundingClientRect();
+  return { rect: { x: b.x, y: b.y, w: b.width, h: b.height }, stack: { left: s.left, top: s.top, scale: s.width / 1920 }, m: { a: m.a, b: m.b, c: m.c, d: m.d, e: m.e, f: m.f } };
+});
+const clickFrame = (page, g, vx, vy) => page.mouse.click(g.stack.left + vx * g.stack.scale, g.stack.top + vy * g.stack.scale);
+
+it("clicking an element leaves a note with the right time, target, scene and camera-free point", async () => {
+  fs.rmSync(feedbackFile, { force: true });
+  const page = await open("?t=3");
+  const g = await rowGeometry(page);
+  const cx = g.rect.x + g.rect.w / 2, cy = g.rect.y + g.rect.h / 2;
+  await clickFrame(page, g, cx, cy);
+  await page.waitForFunction(() => !document.getElementById("noteBox").hidden);
+  assert.equal((await studioState(page)).playing, false);
+  assert.match(await page.textContent("#noteCtx"), /Deterministic frames/, "the box says what was pointed at");
+  await page.fill("#noteText", "make this bigger");
+  await page.keyboard.press("Control+Enter");
+  await page.waitForFunction(() => __studio.notes.length === 1);
+  assert.equal(await page.isHidden("#noteBox"), true);
+
+  const [n] = readNotes();
+  assert.ok(Math.abs(n.t - 3) <= 1 / 60 && Math.abs(n.frame - 180) <= 1, `t=${n.t} frame=${n.frame}`);
+  assert.equal(n.text, "make this bigger");
+  assert.equal(n.status, "open");
+  assert.equal(n.target.text, "Deterministic frames");
+  assert.equal(n.target.tag, "div");
+  assert.match(n.target.path, /^#stage > div\.shot:nth-child\(\d+\) > div\.shot:nth-child\(\d+\) > /, "a path from the stage down through the scene");
+  for (const k of ["x", "y", "w", "h"]) assert.ok(Math.abs(n.target.rect[k] - g.rect[k]) <= 1, `rect.${k}: ${n.target.rect[k]} vs ${g.rect[k]}`);
+  assert.ok(Math.abs(n.point.x - cx) <= 2 && Math.abs(n.point.y - cy) <= 2, `point ${n.point.x},${n.point.y} vs click ${cx},${cy}`);
+  // camera-free: pushing the stage point through the camera's own matrix lands back on the clicked point
+  const { a, b, c, d, e, f } = g.m;
+  const back = { x: a * n.point.stage.x + c * n.point.stage.y + e, y: b * n.point.stage.x + d * n.point.stage.y + f };
+  assert.ok(Math.abs(back.x - n.point.x) <= 0.5 && Math.abs(back.y - n.point.y) <= 0.5, `stage ${JSON.stringify(n.point.stage)} maps to ${JSON.stringify(back)}, not the point`);
+  assert.ok(Math.abs(n.point.stage.x - n.point.x) + Math.abs(n.point.stage.y - n.point.y) > 3, "the camera has moved by t=3, so stage and point differ (the test can tell them apart)");
+  const st = await page.evaluate(() => document.getElementById("comp").contentWindow.__state(3));
+  assert.deepEqual([n.context.bar, n.context.beat, n.context.scene.name], [st.bar, st.beat, "features"]);
+  assert.deepEqual(n.context.cue, st.cue);
+  assert.deepEqual(n.context.next, { name: st.next.name, in: st.next.in });
+
+  // it shows up in the panel and as a pin on the frame
+  assert.equal(await page.locator("#openNotes li").count(), 1);
+  assert.match(await page.textContent("#openNotes li"), /make this bigger/);
+  assert.equal(await page.locator("#pins .pin").count(), 1);
+  await page.context().close();
+});
+
+it("clicking while playing pauses on that frame; Escape drops the note and nothing is written", async () => {
+  fs.rmSync(feedbackFile, { force: true });
+  const page = await open("?t=1");
+  await page.keyboard.press("Space");
+  await sleep(300);
+  assert.equal((await studioState(page)).playing, true);
+  const g = await rowGeometry(page).catch(() => null);
+  const s = await page.evaluate(() => { const r = document.getElementById("stack").getBoundingClientRect(); return { left: r.left, top: r.top, w: r.width, h: r.height }; });
+  await page.mouse.click(s.left + s.w / 2, s.top + s.h / 2);
+  await page.waitForFunction(() => !document.getElementById("noteBox").hidden);
+  const st = await studioState(page);
+  assert.equal(st.playing, false, "the click paused");
+  assert.equal(await page.evaluate(() => __studio.draft.t === __studio.t), true, "and the note is for the frame that is showing");
+  await page.keyboard.press("Escape");
+  assert.equal(await page.isHidden("#noteBox"), true);
+  assert.equal(await page.evaluate(() => __studio.draft), null);
+  await sleep(300);
+  assert.equal(fs.existsSync(feedbackFile), false);
+  void g;
+  await page.context().close();
+});
+
+it("typing a note does not play, pause or seek", async () => {
+  fs.rmSync(feedbackFile, { force: true });
+  const page = await open("?t=2");
+  const s = await page.evaluate(() => { const r = document.getElementById("stack").getBoundingClientRect(); return { left: r.left, top: r.top, w: r.width, h: r.height }; });
+  await page.mouse.click(s.left + s.w / 3, s.top + s.h / 3);
+  await page.waitForFunction(() => !document.getElementById("noteBox").hidden);
+  await page.keyboard.type("a b l ");
+  for (const k of ["ArrowRight", "ArrowLeft", "Shift+ArrowRight", "Home", "End"]) await page.keyboard.press(k);
+  await sleep(200);
+  const st = await studioState(page);
+  assert.deepEqual([st.playing, st.t], [false, 2], "Space and the arrows went into the text box");
+  assert.equal(await page.getAttribute("#loop", "aria-pressed"), "false", "and so did the L");
+  assert.match(await page.inputValue("#noteText"), /^a b l /);
+  await page.keyboard.press("Escape");
+  assert.equal(await page.isHidden("#noteBox"), true);
+  await page.context().close();
+});
+
+it("the notes panel lists open notes by time, jumps to one with its pin, and collapses the resolved", async () => {
+  seed([fakeNote("n1", 5), fakeNote("n2", 1, { point: { x: 960, y: 540, stage: { x: 960, y: 540 } } }), fakeNote("n3", 3), fakeNote("n4", 2, { status: "resolved", resolution: "moved it" })]);
+  const page = await open();
+  await page.waitForFunction(() => __studio.notes.length === 4);
+  const texts = await page.locator("#openNotes li .body").allTextContents();
+  assert.deepEqual(texts, ["note n2", "note n3", "note n1"], "open notes are ordered by t");
+  assert.equal(await page.locator("#doneNotes li").count(), 1);
+  assert.equal(await page.evaluate(() => document.getElementById("doneBox").open), false, "resolved notes start collapsed");
+  assert.match(await page.textContent("#doneBox summary"), /Resolved \(1\)/);
+
+  await page.locator("#openNotes li").first().click();
+  const st = await studioState(page);
+  assert.deepEqual([st.t, st.playing], [1, false]);
+  await page.waitForFunction(() => document.querySelectorAll("#pins .pin.sel").length === 1);
+  const pin = await page.evaluate(() => { const p = document.querySelector("#pins .pin.sel").getBoundingClientRect(), s = document.getElementById("stack").getBoundingClientRect(); return { x: (p.left + p.width / 2 - s.left) / (s.width / 1920), y: (p.top + p.height / 2 - s.top) / (s.width / 1920) }; });
+  assert.ok(Math.abs(pin.x - 960) <= 1 && Math.abs(pin.y - 540) <= 1, `pin at ${pin.x},${pin.y}`);
+  await page.keyboard.press("End");
+  assert.equal(await page.locator("#pins .pin").count(), 0, "the pin is only shown near the note's own frame");
+
+  // the person resolves one from the panel: PATCH, the file changes, the note moves to the resolved list
+  await page.locator("#openNotes li").nth(1).locator("button", { hasText: "Resolve" }).click();
+  await page.waitForFunction(() => document.querySelectorAll("#openNotes li").length === 2);
+  assert.equal(readNotes().find((n) => n.id === "n3").status, "resolved");
+  // the agent resolves one by editing the file: the panel follows without a reload
+  const notes = readNotes();
+  notes.find((n) => n.id === "n1").status = "resolved";
+  notes.find((n) => n.id === "n1").resolution = "done by the agent";
+  seed(notes);
+  await page.waitForFunction(() => document.querySelectorAll("#openNotes li").length === 1);
+  assert.equal(await page.locator("#doneNotes li").count(), 3);
+  assert.match(await page.textContent("#doneNotes"), /done by the agent/);
+  assert.equal((await studioState(page)).loads, 1, "no reload happened");
+  await page.locator("#doneBox summary").click(); // the resolved list is collapsed until asked for
+  await page.locator("#doneNotes li", { hasText: "n1" }).locator("button", { hasText: "Reopen" }).click();
+  await page.waitForFunction(() => document.querySelectorAll("#openNotes li").length === 2);
+  assert.equal(readNotes().find((n) => n.id === "n1").resolution, null);
+  await page.context().close();
+  fs.rmSync(feedbackFile, { force: true });
+});
+
 // ---------------------------------------------------------------------- reloading ----
 it("saving index.html swaps in the new composition, keeps t, and keeps playing", async () => {
   const page = await open("?t=1.2");

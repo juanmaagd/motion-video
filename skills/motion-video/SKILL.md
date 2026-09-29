@@ -5,7 +5,7 @@ compatibility: "Node.js 22+; Python 3 with numpy and Pillow; ffmpeg and ffprobe 
 license: Apache-2.0
 metadata:
   author: "juanmaagd"
-  version: "2.0"
+  version: "2.1"
 ---
 
 # Motion Video

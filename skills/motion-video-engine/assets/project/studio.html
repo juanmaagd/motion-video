@@ -26,7 +26,31 @@
   input[type=range] { accent-color: var(--accent); }
   #scrub { flex: 1 1 260px; min-width: 120px; }
   #latency { width: 110px; }
+  #work { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
+  #side { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; padding: 12px; background: var(--panel); border-left: 1px solid var(--line); }
+  #side h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .muted { color: var(--muted); margin: 0; }
+  ul.notes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .note { padding: 8px 10px; background: #22252a; border: 1px solid var(--line); border-radius: 5px; cursor: pointer; }
+  .note:hover, .note.sel { border-color: var(--accent); }
+  .note .meta { color: var(--muted); font-size: 11px; }
+  .note .body { margin: 2px 0; word-break: break-word; white-space: pre-wrap; }
+  .note .res { color: var(--good); font-size: 11px; }
+  .note .acts { display: flex; gap: 6px; margin-top: 6px; }
+  .note.resolved, .note.wontfix { opacity: 0.75; }
+  .note button, #noteBox button { padding: 2px 8px; font-size: 11px; }
+  details summary { cursor: pointer; color: var(--muted); }
   #viewport { position: relative; display: grid; place-items: center; min-height: 0; overflow: hidden; }
+  #hit { position: absolute; inset: 0; z-index: 2; cursor: crosshair; }
+  #pins { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .pin { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border: 2px solid var(--bad); border-radius: 50%; background: rgba(247, 118, 142, 0.25); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
+  .pin.sel { border-color: var(--accent); background: rgba(122, 162, 247, 0.3); }
+  .pin.draft { border-style: dashed; border-color: #fff; background: rgba(255, 255, 255, 0.2); }
+  #noteBox { position: absolute; z-index: 4; width: 280px; padding: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+  #noteBox textarea { width: 100%; resize: vertical; padding: 6px; background: #101215; border: 1px solid var(--line); border-radius: 4px; color: inherit; font: inherit; }
+  #noteBox .ctx { margin-bottom: 6px; color: var(--muted); font-size: 11px; word-break: break-word; }
+  #noteBox .row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+  #noteErr { flex: 1; color: var(--bad); font-size: 11px; }
   #stack { position: relative; background: #0b0c0e; box-shadow: 0 0 0 1px var(--line); }
   #stack iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: #fff; }
   #overlay { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; background: rgba(20, 21, 24, 0.72); }
@@ -49,10 +73,27 @@
   </label>
 </header>
 
-<main id="viewport">
-  <div id="stack"></div>
-  <div id="overlay" hidden role="alert"><div class="box"><h2 id="errTitle"></h2><pre id="errBody"></pre></div></div>
-</main>
+<div id="work">
+  <main id="viewport">
+    <div id="stack">
+      <div id="hit" title="Click to leave a note here"></div>
+      <div id="pins"></div>
+      <form id="noteBox" hidden>
+        <div class="ctx" id="noteCtx"></div>
+        <textarea id="noteText" rows="3" maxlength="2000" placeholder="What should change here?" aria-label="note"></textarea>
+        <div class="row"><span id="noteErr" role="alert"></span><button type="button" id="noteCancel">Cancel</button><button type="submit" id="noteAdd">Add note</button></div>
+      </form>
+    </div>
+    <div id="overlay" hidden role="alert"><div class="box"><h2 id="errTitle"></h2><pre id="errBody"></pre></div></div>
+  </main>
+  <aside id="side">
+    <h2>Notes <span id="noteCount"></span></h2>
+    <p class="muted" id="noNotes">Click the frame to leave a note: it records the time, the scene and the element you pointed at.</p>
+    <ul class="notes" id="openNotes"></ul>
+    <details id="doneBox" hidden><summary>Resolved (<span id="doneCount">0</span>)</summary><ul class="notes" id="doneNotes"></ul></details>
+    <p class="muted" id="notesErr" role="alert"></p>
+  </aside>
+</div>
 
 <footer>
   <button id="play" aria-label="play or pause">Play</button>
@@ -66,7 +107,7 @@
     <span>next <b id="rn">-</b></span>
     <span>scenes <b id="rs">-</b></span>
   </div>
-  <div class="keys">Space play/pause · ←/→ frame · Shift+←/→ beat · L loop · URL: ?t=3.5 &amp; ?loop=2:4</div>
+  <div class="keys">Space play/pause · ←/→ frame · Shift+←/→ beat · L loop · click the frame to leave a note · URL: ?t=3.5 &amp; ?loop=2:4</div>
 </footer>
 
 <script>
@@ -87,7 +128,9 @@ const S = {
   tl: null, queried: false, scale: 1, t: 0, playing: false, starting: false, loop: false, loopA: 0, loopB: 0,
   frameEl: null, rendered: null, loads: 0, error: null, run: null, raf: 0,
   ctx: null, audioBuffer: null, source: null, clock: null, latencyMs: 0, wasPlaying: false,
+  notes: [], selected: null, draft: null, pinKey: "",
 };
+const TOKEN = document.querySelector('meta[name="studio-token"]').content;
 
 // ------------------------------------------------------------------ timeline math ----
 const frames = () => Math.round(S.tl.fps * S.tl.duration);
@@ -129,6 +172,9 @@ function fit() {
   $("stack").style.width = `${S.tl.width * S.scale}px`;
   $("stack").style.height = `${S.tl.height * S.scale}px`;
   for (const f of $("stack").querySelectorAll("iframe")) sizeFrame(f);
+  S.pinKey = "";
+  renderPins();
+  if (S.draft) placeNoteBox();
 }
 new ResizeObserver(fit).observe($("viewport"));
 
@@ -227,6 +273,7 @@ function updateUI() {
   $("rc").textContent = st?.cue ? `${st.cue.name} @ ${st.cue.t.toFixed(3)}` : "-";
   $("rn").textContent = st?.next ? `${st.next.name} in ${st.next.in.toFixed(2)} s` : "-";
   $("rs").textContent = st ? st.scenes.map((s) => s.name).join(", ") || "none" : "-";
+  renderPins();
 }
 
 // ------------------------------------------------------------------------- audio ----
@@ -371,8 +418,10 @@ $("latency").addEventListener("input", (e) => {
 // Keys are handled here, on the parent page (the iframe ignores the pointer, so it never takes focus).
 window.addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || !S.tl) return;
+  if (e.target.matches?.("textarea, input:not([type=range])")) { if (e.key === "Escape" && S.draft) cancelNote(); return; } // typing is not transport
   if (e.target.id === "latency" && e.key.startsWith("Arrow")) return; // let the slider use its own arrows
-  if (e.key === " ") togglePlay();
+  if (e.key === "Escape") { if (S.draft) cancelNote(); else if (S.selected) { S.selected = null; renderNotes(); } }
+  else if (e.key === " ") togglePlay();
   else if (e.key === "ArrowLeft" || e.key === "ArrowRight") step(e.shiftKey ? "beat" : "frame", e.key === "ArrowRight" ? 1 : -1);
   else if (e.key === "l" || e.key === "L") setLoop(!S.loop);
   else if (e.key === "Home") seek(0);
@@ -381,6 +430,153 @@ window.addEventListener("keydown", (e) => {
   e.preventDefault();
 }, true);
 window.addEventListener("keyup", (e) => { if (e.key === " ") e.preventDefault(); }, true); // Space must not also "click" a focused button
+
+// ------------------------------------------------------------------------- notes ----
+// Click the frame -> a note box at that point -> POST /api/feedback. The server derives the note (id, frame,
+// status); this page sends the time, the point, what window.__pick says is there, and the person's text.
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method, headers: { "content-type": "application/json", "x-studio-token": TOKEN }, body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+const round1 = (v) => Math.round(v * 10) / 10;
+const noteWhere = (n) => `t ${Number(n.t).toFixed(3)} · bar ${n.context?.bar ?? "-"}.${n.context?.beat ?? "-"}${n.context?.scene ? ` · ${n.context.scene.name}` : ""}`;
+
+function placeNoteBox() {
+  const box = $("noteBox"), stack = $("stack").getBoundingClientRect();
+  const px = S.draft.point.x * S.scale, py = S.draft.point.y * S.scale;
+  const left = px + 296 > stack.width ? px - 296 : px + 16;
+  box.style.left = `${Math.max(4, Math.min(left, stack.width - 284))}px`;
+  box.style.top = `${Math.max(4, Math.min(py - 24, stack.height - 170))}px`;
+}
+function startNote(clientX, clientY) {
+  const w = compWindow();
+  if (!S.tl || !isReady(w)) return;
+  if (S.playing) pause();
+  renderFrame(S.t, true); // what __pick reads must be the frame the person is looking at
+  const r = $("stack").getBoundingClientRect();
+  const x = round1((clientX - r.left) / S.scale), y = round1((clientY - r.top) / S.scale);
+  let pick = null, st = null;
+  try { pick = w.__pick(x, y); st = w.__state(S.t); } catch { /* an engine without the hooks: the note still carries t and the point */ }
+  S.draft = {
+    t: S.t, point: { x, y, stage: pick?.stage ?? { x, y } }, target: pick?.target ?? null,
+    context: { bar: st?.bar ?? 0, beat: st?.beat ?? 0, cue: st?.cue ?? null, next: st?.next ?? null, scene: pick?.scene ?? null },
+  };
+  $("noteCtx").textContent = `${noteWhere(S.draft)}${S.draft.target ? ` · ${S.draft.target.tag}${S.draft.target.text ? ` "${S.draft.target.text}"` : ""}` : ""}`;
+  $("noteErr").textContent = "";
+  $("noteText").value = "";
+  $("noteBox").hidden = false;
+  placeNoteBox();
+  S.pinKey = "";
+  renderPins();
+  $("noteText").focus();
+}
+function cancelNote() {
+  S.draft = null;
+  $("noteBox").hidden = true;
+  S.pinKey = "";
+  renderPins();
+}
+$("hit").addEventListener("click", (e) => startNote(e.clientX, e.clientY));
+$("noteCancel").addEventListener("click", cancelNote);
+$("noteText").addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); $("noteBox").requestSubmit(); } });
+$("noteBox").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("noteText").value.trim();
+  if (!text) { $("noteErr").textContent = "Write what should change."; return; }
+  try {
+    const { note } = await api("POST", "/api/feedback", { t: S.draft.t, point: S.draft.point, context: S.draft.context, target: S.draft.target, text });
+    S.selected = note.id;
+    cancelNote();
+    await refreshNotes();
+  } catch (err) {
+    $("noteErr").textContent = err.message;
+  }
+});
+
+// A pin marks every open note within a tenth of a second of the frame on screen, the selected one in blue,
+// and the note being written in white. Rebuilt only when that set changes.
+function renderPins() {
+  if (!S.tl) return;
+  const near = Math.max(1, Math.round(S.tl.fps / 10)), f = frameOf(S.t);
+  const shown = S.notes.filter((n) => n.status === "open" && n.point && Math.abs(n.frame - f) <= near);
+  const key = `${S.scale}|${shown.map((n) => `${n.id}${n.id === S.selected ? "*" : ""}`).join(",")}|${S.draft ? "d" : ""}`;
+  if (key === S.pinKey) return;
+  S.pinKey = key;
+  const box = $("pins");
+  box.textContent = "";
+  const add = (pt, cls, title) => {
+    const d = document.createElement("div");
+    d.className = `pin ${cls}`.trim();
+    d.style.left = `${pt.x * S.scale}px`;
+    d.style.top = `${pt.y * S.scale}px`;
+    if (title) d.title = title;
+    box.appendChild(d);
+  };
+  for (const n of shown) add(n.point, n.id === S.selected ? "sel" : "", n.text);
+  if (S.draft) add(S.draft.point, "draft");
+}
+
+function noteItem(n) {
+  const li = document.createElement("li");
+  li.className = `note ${n.status}${n.id === S.selected ? " sel" : ""}`;
+  const add = (cls, text) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; li.appendChild(d); return d; };
+  add("meta", `${n.id} · ${noteWhere(n)}${n.target ? ` · ${n.target.tag}${n.target.text ? ` "${n.target.text}"` : ""}` : ""}`);
+  add("body", n.text);
+  if (n.resolution) add("res", n.resolution);
+  const acts = document.createElement("div");
+  acts.className = "acts";
+  const act = (label, status) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); setStatus(n.id, status); });
+    acts.appendChild(b);
+  };
+  if (n.status === "open") { act("Resolve", "resolved"); act("Won't fix", "wontfix"); } else act("Reopen", "open");
+  li.appendChild(acts);
+  li.addEventListener("click", () => selectNote(n.id));
+  return li;
+}
+function renderNotes() {
+  const byTime = (a, b) => a.t - b.t || String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+  const open = S.notes.filter((n) => n.status === "open").sort(byTime), done = S.notes.filter((n) => n.status !== "open").sort(byTime);
+  $("noteCount").textContent = open.length ? `(${open.length} open)` : "";
+  $("noNotes").hidden = S.notes.length > 0;
+  $("openNotes").replaceChildren(...open.map(noteItem));
+  $("doneNotes").replaceChildren(...done.map(noteItem));
+  $("doneCount").textContent = String(done.length);
+  $("doneBox").hidden = done.length === 0;
+  S.pinKey = "";
+  renderPins();
+}
+async function refreshNotes() {
+  try {
+    const res = await fetch("/api/feedback", { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    S.notes = data.notes;
+    $("notesErr").textContent = "";
+  } catch (e) {
+    $("notesErr").textContent = `Notes unavailable: ${e.message}`;
+    return;
+  }
+  renderNotes();
+}
+async function setStatus(id, status) {
+  try { await api("PATCH", `/api/feedback/${id}`, { status, resolution: null }); await refreshNotes(); } catch (e) { $("notesErr").textContent = e.message; }
+}
+function selectNote(id) {
+  const n = S.notes.find((x) => x.id === id);
+  if (!n || !S.tl) return;
+  S.selected = id;
+  pause();
+  seek(n.t);
+  renderNotes();
+}
 
 // ------------------------------------------------------------------ server events ----
 async function fetchProject() {
@@ -424,6 +620,7 @@ function connectEvents() {
   on("reload", () => reload());
   on("audio-stale", () => setAudioPill("regenerating"));
   on("audio-ready", ({ url }) => loadAudio(url));
+  on("feedback-changed", () => refreshNotes());
   on("audio-error", ({ message }) => setAudioPill(S.audioBuffer ? `${message} (still playing the last good version)` : `no sound: ${message}`, "bad"));
 }
 
@@ -436,6 +633,7 @@ async function boot() {
     $("latencyOut").textContent = `${S.latencyMs} ms`;
   }
   connectEvents();
+  refreshNotes();
   await reload();
 }
 
@@ -450,6 +648,8 @@ window.__studio = {
   get audioSeconds() { return S.audioBuffer ? S.audioBuffer.duration : null; },
   get audioClock() { return !!(S.playing && S.clock?.audio); },
   get audioState() { return S.ctx ? S.ctx.state : null; },
+  get notes() { return S.notes; },
+  get draft() { return S.draft; },
   seek, play, pause,
 };
 boot();
